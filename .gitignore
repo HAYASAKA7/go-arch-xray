@@ -5,6 +5,7 @@
 go-arch-xray.exe
 go-arch-xray
 *.exe
+*.exe~
 *.test
 *.out
 

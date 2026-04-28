@@ -207,6 +207,144 @@ func TestHandleFindCallers_ReturnsIncomingEdges(t *testing.T) {
 	}
 }
 
+func TestHandleCheckArchitectureBoundaries_DetectsForbidViolation(t *testing.T) {
+	dir := createMainTestModule(t, "handlerbounds", map[string]string{
+		"app/app.go": "package app\n\nimport \"handlerbounds/db\"\n\nfunc Run() string { return db.Query() }\n",
+		"db/db.go":   "package db\n\nfunc Query() string { return \"\" }\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	rules := []analyzer.BoundaryRule{
+		{Type: analyzer.RuleForbid, From: "handlerbounds/app", To: "handlerbounds/db"},
+	}
+	toolResult, result, err := handleCheckArchitectureBoundaries(context.Background(), nil, CheckArchitectureBoundariesInput{
+		RootPath: dir,
+		Rules:    rules,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.ViolationCount == 0 {
+		t.Fatalf("expected at least one boundary violation, got %#v", result)
+	}
+}
+
+func TestHandleCheckArchitectureBoundaries_NoRulesReturnsEmpty(t *testing.T) {
+	dir := createMainTestModule(t, "handlerboundsnone", map[string]string{
+		"main.go": "package main\n\nfunc main() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleCheckArchitectureBoundaries(context.Background(), nil, CheckArchitectureBoundariesInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.ViolationCount != 0 {
+		t.Fatalf("expected zero violations with no rules, got %#v", result)
+	}
+}
+
+func TestHandleListEntrypoints_DetectsMainFunction(t *testing.T) {
+	dir := createMainTestModule(t, "handlerentrypoints", map[string]string{
+		"main.go": "package main\n\nfunc main() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleListEntrypoints(context.Background(), nil, ListEntrypointsInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.Total == 0 {
+		t.Fatalf("expected at least one entrypoint, got %#v", result)
+	}
+	found := false
+	for _, ep := range result.Entrypoints {
+		if ep.Kind == analyzer.EntrypointMain {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a main entrypoint, got %#v", result.Entrypoints)
+	}
+}
+
+func TestHandleListEntrypoints_TotalMatchesSlice(t *testing.T) {
+	dir := createMainTestModule(t, "handlerentrypointslen", map[string]string{
+		"main.go": "package main\n\nfunc main() { go worker() }\nfunc worker() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	_, result, err := handleListEntrypoints(context.Background(), nil, ListEntrypointsInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected entrypoints result")
+	}
+	if result.Total != len(result.Entrypoints) {
+		t.Fatalf("Total %d != len(Entrypoints) %d", result.Total, len(result.Entrypoints))
+	}
+}
+
+func TestHandleListHTTPRoutes_DetectsHandleFunc(t *testing.T) {
+	dir := createMainTestModule(t, "handlerroutes", map[string]string{
+		"main.go": "package main\n\ntype Router struct{}\n\nfunc (r *Router) HandleFunc(path string, h func()) {}\n\nfunc handler() {}\n\nfunc main() {\n\tr := &Router{}\n\tr.HandleFunc(\"/api/v1\", handler)\n}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleListHTTPRoutes(context.Background(), nil, ListHTTPRoutesInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.Total == 0 {
+		t.Fatalf("expected HTTP routes, got %#v", result)
+	}
+	if result.Routes[0].Path != "/api/v1" {
+		t.Fatalf("expected path /api/v1, got %q", result.Routes[0].Path)
+	}
+}
+
+func TestHandleListHTTPRoutes_TotalMatchesSlice(t *testing.T) {
+	dir := createMainTestModule(t, "handlerrouteslen", map[string]string{
+		"main.go": "package main\n\ntype Router struct{}\n\nfunc (r *Router) HandleFunc(path string, h func()) {}\n\nfunc main() {\n\tr := &Router{}\n\tr.HandleFunc(\"/a\", nil)\n\tr.HandleFunc(\"/b\", nil)\n}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	_, result, err := handleListHTTPRoutes(context.Background(), nil, ListHTTPRoutesInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected routes result")
+	}
+	if result.Total != len(result.Routes) {
+		t.Fatalf("Total %d != len(Routes) %d", result.Total, len(result.Routes))
+	}
+}
+
 func TestHandleCacheStatusAndClearCache(t *testing.T) {
 	dir := createMainTestModule(t, "handlercache", map[string]string{
 		"main.go": "package main\n\nfunc Root() {}\n",
@@ -287,7 +425,7 @@ func analyzerShortName(name string) string {
 	return name
 }
 
-func createMainTestModule(t *testing.T, name string, files map[string]string) string {
+func createMainTestModule(t testing.TB, name string, files map[string]string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

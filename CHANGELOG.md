@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-04-28
 
 ### Added
+
 - `check_architecture_boundaries` tool: evaluates every package's import
   graph against a configurable ruleset. Supports three rule types:
   - `forbid` — any import from a `from`-matching package to a `to`-matching
@@ -32,11 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `analyzer.HTTPRoute` / `HTTPRoutesResult` types.
 
 ### Changed
+
 - Server version bumped to `0.4.0`.
 
-
+## [0.3.1] - 2026-04-28
 
 ### Added
+
 - Shared query/output controls for high-volume tools:
   - `limit`
   - `offset`
@@ -48,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`total_packages`, `total_imports`, per-package import counts).
 
 ### Changed
+
 - Output throttling/pagination behavior is now standardized across call
   hierarchy, dependency, and lifecycle-style large result sets.
 - Truncation metadata is now consistently populated with
@@ -57,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-04-28
 
 ### Added
+
 - `find_callers` tool: reverse call hierarchy — returns the incoming caller
   tree for any function up to `max_depth` hops (default 3, max 8) using
   the cached CHA call graph. Edges are labelled `Static`, `Interface`, or
@@ -93,6 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-04-28
 
 ### Added
+
 - Multi-pattern queries: every tool now accepts `package_patterns: string[]`
   (or a comma-separated `package_pattern`) so a single request can scan
   across `./internal/...`, `./pkg/...`, etc. without reloading.
@@ -113,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LRU eviction, CHA reuse, and root-only SSA function set.
 
 ### Changed
+
 - SSA program is built only for the requested (root) packages via
   `ssautil.Packages` + `ssa.BareInits | ssa.InstantiateGenerics`;
   transitive dependencies stay as type-only entries. Drastically lowers
@@ -130,11 +137,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Server version bumped to `0.2.0`.
 
 ### Removed
+
 - README warning about memory usage risk; the issue has been mitigated.
 
 ## [0.1.0] - 2026-04
 
 ### Added
+
 - Initial MCP server with six tools: `get_interface_topology`,
   `analyze_call_hierarchy`, `trace_struct_lifecycle`,
   `detect_concurrency_risks`, `reload_workspace`,
