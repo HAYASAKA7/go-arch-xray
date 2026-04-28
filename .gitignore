@@ -1,0 +1,25 @@
+# Local editor/agent settings
+.claude/settings.local.json
+
+# Build outputs
+go-arch-xray.exe
+go-arch-xray
+*.exe
+*.test
+*.out
+
+# Go workspace/vendor artifacts
+vendor/
+go.work
+go.work.sum
+
+# Coverage and profiling
+coverage.out
+*.coverprofile
+*.prof
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
