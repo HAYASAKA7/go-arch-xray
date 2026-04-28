@@ -11,13 +11,38 @@ Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codeb
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
 - `get_package_dependencies`: Returns direct package import dependencies for architecture boundary inspection.
 
-## Build
+## Install From GitHub Releases
+
+Tagged releases build binaries for:
+
+- Windows amd64: `go-arch-xray-<tag>-windows-amd64.zip`
+- Windows arm64: `go-arch-xray-<tag>-windows-arm64.zip`
+- macOS Intel: `go-arch-xray-<tag>-darwin-amd64.tar.gz`
+- macOS Apple Silicon: `go-arch-xray-<tag>-darwin-arm64.tar.gz`
+- Linux amd64: `go-arch-xray-<tag>-linux-amd64.tar.gz`
+- Linux arm64: `go-arch-xray-<tag>-linux-arm64.tar.gz`
+
+Download the archive for your platform from the GitHub Releases page, extract it, and use the extracted binary path in your MCP host configuration.
+
+On macOS/Linux, make the binary executable if needed:
+
+```bash
+chmod +x ./go-arch-xray-*
+```
+
+## Build From Source
 
 ```powershell
 go build ./...
 ```
 
-Release-style Windows binary:
+Release-style binary for macOS/Linux:
+
+```bash
+go build -trimpath -ldflags "-s -w" -o go-arch-xray .
+```
+
+Release-style binary for Windows:
 
 ```powershell
 go build -trimpath -ldflags "-s -w" -o go-arch-xray.exe .
@@ -26,6 +51,8 @@ go build -trimpath -ldflags "-s -w" -o go-arch-xray.exe .
 ## MCP Host Configuration
 
 Use the absolute path to the compiled binary.
+
+Windows:
 
 ```json
 {
@@ -37,6 +64,43 @@ Use the absolute path to the compiled binary.
   }
 }
 ```
+
+macOS/Linux:
+
+```json
+{
+  "mcpServers": {
+    "go-arch-xray": {
+      "command": "/usr/local/bin/go-arch-xray",
+      "args": []
+    }
+  }
+}
+```
+
+If you downloaded a release asset, the extracted binary name includes the target platform, for example:
+
+```json
+{
+  "mcpServers": {
+    "go-arch-xray": {
+      "command": "/Users/you/bin/go-arch-xray-darwin-arm64",
+      "args": []
+    }
+  }
+}
+```
+
+## Release Workflow
+
+Maintainers can publish a release by pushing a tag that starts with `v`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.
 
 ## Common Inputs
 
