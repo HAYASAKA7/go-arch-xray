@@ -29,9 +29,6 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string) (*Stru
 	if strings.TrimSpace(structName) == "" {
 		return nil, fmt.Errorf("struct name is required")
 	}
-	if strings.TrimSpace(pattern) == "" {
-		pattern = "./..."
-	}
 
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {

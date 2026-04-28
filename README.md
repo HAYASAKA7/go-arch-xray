@@ -1,10 +1,18 @@
 # Go Architecture X-Ray MCP
 
-Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped in-memory analysis cache for the life of the MCP session.
+Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-# WARNNING
+## What's New (0.2.x)
 
-## This tool now has memory usage risks, __DO NOT USE__ until new version releases
+- **Multi-pattern queries**: every tool now accepts `package_patterns: string[]` (or a comma-separated `package_pattern`) so a single request can scan across `./internal/...`, `./pkg/...`, etc. without reloading.
+- **Drastically lower memory**: SSA bodies are built only for the requested (root) packages via `ssautil.Packages` + `ssa.BareInits`; transitive deps stay as type-only entries. CHA call graphs are now cached per loaded program (built lazily on first call-hierarchy request) instead of being rebuilt for every query. After SSA build, the loader also drops `Syntax`, `TypesInfo`, and the bulk of the `go/packages` file lists.
+- **LRU cache eviction**: at most 2 distinct `(root, patterns)` programs are kept live at once; older ones are evicted automatically.
+- **Tighter scans**: lifecycle and concurrency analyzers now iterate only functions in your root packages, not stdlib wrappers — fewer false positives, less work.
+- **Better interface lookup**: fully-qualified interface names (`pkgpath.Name`) are resolved across all loaded packages, including dependencies.
+
+## Memory note
+
+If you still observe high RSS on very large monorepos, narrow your `package_patterns` to the modules you actually want to inspect rather than `./...`.
 
 ## Tools
 
@@ -100,8 +108,8 @@ If you downloaded a release asset, the extracted binary name includes the target
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.
@@ -111,9 +119,21 @@ The GitHub Actions workflow runs tests, cross-compiles release binaries for Wind
 Most tools accept:
 
 - `root_path`: Root directory of the Go project. Defaults to the server working directory.
-- `package_pattern`: Go package pattern. Defaults to `./...`.
+- `package_pattern`: Single Go package pattern. Also accepts a comma-separated list. Defaults to `./...`.
+- `package_patterns`: Array of Go package patterns. Merged with `package_pattern` (deduplicated). Use this for multi-module / multi-subtree scans in one request.
 
-Example `get_interface_topology` input:
+Multi-pattern example for `get_interface_topology`:
+
+```json
+{
+  "root_path": "D:\\Projects\\ExampleGoProject",
+  "package_patterns": ["./internal/...", "./pkg/api/..."],
+  "interface_name": "example.com/project/internal/api.Service",
+  "include_stdlib": false
+}
+```
+
+Legacy single-pattern example:
 
 ```json
 {

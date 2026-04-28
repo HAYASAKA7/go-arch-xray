@@ -26,78 +26,63 @@ func GetInterfaceTopology(ws *Workspace, dir, pattern, ifaceName string, include
 	if strings.TrimSpace(ifaceName) == "" {
 		return nil, fmt.Errorf("interface name is required")
 	}
-	if strings.TrimSpace(pattern) == "" {
-		pattern = "./..."
-	}
 
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
-	iface, err := findInterface(prog.Packages, ifaceName)
+	loaded := AllLoadedPackages(prog.Packages)
+
+	iface, err := findInterface(loaded, prog.Packages, ifaceName)
 	if err != nil {
 		return nil, err
 	}
 
-	result := &TopologyResult{Interface: ifaceName}
-
-	rootPaths := make(map[string]bool, len(prog.Packages))
-	for _, pkg := range prog.Packages {
-		rootPaths[pkg.PkgPath] = true
+	result := &TopologyResult{
+		Interface:    ifaceName,
+		Implementors: make([]Implementor, 0, 16),
 	}
 
-	seen := make(map[string]bool)
-	var walk func([]*packages.Package)
-	walk = func(pkgs []*packages.Package) {
-		for _, pkg := range pkgs {
-			if seen[pkg.PkgPath] {
-				continue
-			}
-			seen[pkg.PkgPath] = true
-
-			if !includeStdlib && !rootPaths[pkg.PkgPath] && isStdlib(pkg.PkgPath) {
-				continue
-			}
-
-			collectImplementors(pkg, iface, &result.Implementors)
-
-			for _, imp := range pkg.Imports {
-				walk([]*packages.Package{imp})
-			}
+	for path, pkg := range loaded {
+		if pkg == nil || pkg.Types == nil {
+			continue
 		}
+		isRoot := prog.RootPaths[path]
+		if !includeStdlib && !isRoot && isStdlib(path) {
+			continue
+		}
+		collectImplementors(pkg, iface, &result.Implementors)
 	}
-	walk(prog.Packages)
 
 	sort.Slice(result.Implementors, func(i, j int) bool {
-		if result.Implementors[i].Package != result.Implementors[j].Package {
-			return result.Implementors[i].Package < result.Implementors[j].Package
+		a, b := result.Implementors[i], result.Implementors[j]
+		if a.Package != b.Package {
+			return a.Package < b.Package
 		}
-		if result.Implementors[i].Struct != result.Implementors[j].Struct {
-			return result.Implementors[i].Struct < result.Implementors[j].Struct
+		if a.Struct != b.Struct {
+			return a.Struct < b.Struct
 		}
-		if result.Implementors[i].File != result.Implementors[j].File {
-			return result.Implementors[i].File < result.Implementors[j].File
+		if a.File != b.File {
+			return a.File < b.File
 		}
-		return result.Implementors[i].Line < result.Implementors[j].Line
+		return a.Line < b.Line
 	})
 
 	return result, nil
 }
 
-func findInterface(pkgs []*packages.Package, name string) (*types.Interface, error) {
+func findInterface(loaded map[string]*packages.Package, roots []*packages.Package, name string) (*types.Interface, error) {
 	if idx := strings.LastIndex(name, "."); idx > 0 && idx < len(name)-1 {
 		pkgPath, typeName := name[:idx], name[idx+1:]
-		for _, pkg := range pkgs {
-			if pkg.PkgPath != pkgPath {
-				continue
-			}
+		if pkg, ok := loaded[pkgPath]; ok && pkg.Types != nil {
 			return findInterfaceInPackage(pkg, typeName, name)
 		}
 		return nil, fmt.Errorf("interface %s not found in loaded packages", name)
 	}
 
-	for _, pkg := range pkgs {
+	// Unqualified: search root packages first for determinism.
+	for _, pkg := range roots {
 		iface, err := findInterfaceInPackage(pkg, name, name)
 		if err == errInterfaceNotInPackage {
 			continue
@@ -107,12 +92,15 @@ func findInterface(pkgs []*packages.Package, name string) (*types.Interface, err
 		}
 		return iface, nil
 	}
-	return nil, fmt.Errorf("interface %s not found in loaded packages", name)
+	return nil, fmt.Errorf("interface %s not found in loaded root packages; pass a fully-qualified name (pkgpath.Name) to search dependencies", name)
 }
 
 var errInterfaceNotInPackage = fmt.Errorf("interface not in package")
 
 func findInterfaceInPackage(pkg *packages.Package, typeName, displayName string) (*types.Interface, error) {
+	if pkg == nil || pkg.Types == nil {
+		return nil, errInterfaceNotInPackage
+	}
 	scope := pkg.Types.Scope()
 	obj := scope.Lookup(typeName)
 	if obj == nil {
@@ -145,34 +133,36 @@ func collectImplementors(pkg *packages.Package, iface *types.Interface, out *[]I
 			continue
 		}
 
-		T := named
-		ptrT := types.NewPointer(T)
+		T := types.Type(named)
+		ptrT := types.NewPointer(named)
 
-		if implementsInterface(T, iface) || implementsInterface(ptrT, iface) {
-			pos := pkg.Fset.Position(obj.Pos())
-			*out = append(*out, Implementor{
-				Struct:  name,
-				Package: pkg.PkgPath,
-				File:    pos.Filename,
-				Line:    pos.Line,
-				Anchor:  contextAnchor(pos.Filename, pos.Line, name),
-			})
+		if !implementsInterface(T, iface) && !implementsInterface(ptrT, iface) {
+			continue
 		}
-	}
-}
 
-func implementsInterface(T types.Type, iface *types.Interface) bool {
-	return types.Implements(T, iface) || types.AssignableTo(T, iface)
+		pos := pkg.Fset.Position(obj.Pos())
+		*out = append(*out, Implementor{
+			Struct:  name,
+			Package: pkg.PkgPath,
+			File:    pos.Filename,
+			Line:    pos.Line,
+			Anchor:  contextAnchor(pos.Filename, pos.Line, name),
+		})
+	}
 }
 
 func isStdlib(pkgPath string) bool {
 	for i := 0; i < len(pkgPath); i++ {
-		if pkgPath[i] == '.' {
+		switch pkgPath[i] {
+		case '.':
 			return false
-		}
-		if pkgPath[i] == '/' {
+		case '/':
 			return true
 		}
 	}
 	return true
+}
+
+func implementsInterface(T types.Type, iface *types.Interface) bool {
+	return types.Implements(T, iface) || types.AssignableTo(T, iface)
 }

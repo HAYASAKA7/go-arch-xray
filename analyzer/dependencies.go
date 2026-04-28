@@ -3,7 +3,6 @@ package analyzer
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -21,10 +20,6 @@ type DependencyResult struct {
 }
 
 func GetPackageDependencies(ws *Workspace, dir, pattern string, includeStdlib bool) (*DependencyResult, error) {
-	if strings.TrimSpace(pattern) == "" {
-		pattern = "./..."
-	}
-
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)

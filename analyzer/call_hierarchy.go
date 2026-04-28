@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
-	"golang.org/x/tools/go/callgraph/cha"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -32,9 +31,6 @@ func AnalyzeCallHierarchy(ws *Workspace, dir, pattern, functionName string, maxD
 	if strings.TrimSpace(functionName) == "" {
 		return nil, fmt.Errorf("function name is required")
 	}
-	if strings.TrimSpace(pattern) == "" {
-		pattern = "./..."
-	}
 	if maxDepth <= 0 || maxDepth > defaultCallHierarchyMaxDepth {
 		maxDepth = defaultCallHierarchyMaxDepth
 	}
@@ -49,7 +45,7 @@ func AnalyzeCallHierarchy(ws *Workspace, dir, pattern, functionName string, maxD
 		return nil, err
 	}
 
-	graph := cha.CallGraph(prog.SSA)
+	graph := prog.CallGraph()
 	rootNode := graph.Nodes[root]
 	if rootNode == nil {
 		return nil, fmt.Errorf("function %s not found in call graph", functionName)

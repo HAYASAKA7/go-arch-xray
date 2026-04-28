@@ -25,10 +25,6 @@ type ConcurrencyRisk struct {
 }
 
 func DetectConcurrencyRisks(ws *Workspace, dir, pattern string) (*ConcurrencyRiskResult, error) {
-	if strings.TrimSpace(pattern) == "" {
-		pattern = "./..."
-	}
-
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
