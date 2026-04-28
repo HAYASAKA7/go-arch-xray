@@ -17,21 +17,21 @@ var (
 )
 
 type InterfaceTopologyInput struct {
-	InterfaceName  string `json:"interface_name" jsonschema:"description=Name of the interface to find implementors for"`
-	PackagePattern string `json:"package_pattern" jsonschema:"description=Go package pattern to scan (e.g. ./... or ./internal/...)"`
-	RootPath       string `json:"root_path,omitempty" jsonschema:"description=Root directory of the Go project (defaults to cwd)"`
-	IncludeStdlib  bool   `json:"include_stdlib,omitempty" jsonschema:"description=Include standard library implementations"`
+	InterfaceName  string `json:"interface_name" jsonschema:"Name of the interface to find implementors for"`
+	PackagePattern string `json:"package_pattern" jsonschema:"Go package pattern to scan (e.g. ./... or ./internal/...)"`
+	RootPath       string `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	IncludeStdlib  bool   `json:"include_stdlib,omitempty" jsonschema:"Include standard library implementations"`
 }
 
 type PackageDependenciesInput struct {
-	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"description=Go package pattern to scan (defaults to ./...)"`
-	RootPath       string `json:"root_path,omitempty" jsonschema:"description=Root directory of the Go project (defaults to cwd)"`
-	IncludeStdlib  bool   `json:"include_stdlib,omitempty" jsonschema:"description=Include standard library imports"`
+	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"Go package pattern to scan (defaults to ./...)"`
+	RootPath       string `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	IncludeStdlib  bool   `json:"include_stdlib,omitempty" jsonschema:"Include standard library imports"`
 }
 
 type ReloadWorkspaceInput struct {
-	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"description=Go package pattern to reload (defaults to ./...)"`
-	RootPath       string `json:"root_path,omitempty" jsonschema:"description=Root directory of the Go project (defaults to cwd)"`
+	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"Go package pattern to reload (defaults to ./...)"`
+	RootPath       string `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 }
 
 type ReloadWorkspaceResult struct {
@@ -42,21 +42,21 @@ type ReloadWorkspaceResult struct {
 }
 
 type CallHierarchyInput struct {
-	FunctionName   string `json:"function_name" jsonschema:"description=Function name to analyze; may be short name or package-qualified"`
-	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"description=Go package pattern to scan (defaults to ./...)"`
-	RootPath       string `json:"root_path,omitempty" jsonschema:"description=Root directory of the Go project (defaults to cwd)"`
-	MaxDepth       int    `json:"max_depth,omitempty" jsonschema:"description=Maximum call depth, capped at 3"`
+	FunctionName   string `json:"function_name" jsonschema:"Function name to analyze; may be short name or package-qualified"`
+	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"Go package pattern to scan (defaults to ./...)"`
+	RootPath       string `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	MaxDepth       int    `json:"max_depth,omitempty" jsonschema:"Maximum call depth, capped at 3"`
 }
 
 type StructLifecycleInput struct {
-	StructName     string `json:"struct_name" jsonschema:"description=Struct type name to trace"`
-	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"description=Go package pattern to scan (defaults to ./...)"`
-	RootPath       string `json:"root_path,omitempty" jsonschema:"description=Root directory of the Go project (defaults to cwd)"`
+	StructName     string `json:"struct_name" jsonschema:"Struct type name to trace"`
+	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"Go package pattern to scan (defaults to ./...)"`
+	RootPath       string `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 }
 
 type ConcurrencyRisksInput struct {
-	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"description=Go package pattern to scan (defaults to ./...)"`
-	RootPath       string `json:"root_path,omitempty" jsonschema:"description=Root directory of the Go project (defaults to cwd)"`
+	PackagePattern string `json:"package_pattern,omitempty" jsonschema:"Go package pattern to scan (defaults to ./...)"`
+	RootPath       string `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 }
 
 func main() {

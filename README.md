@@ -2,6 +2,10 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped in-memory analysis cache for the life of the MCP session.
 
+# WARNNING
+
+## This tool now has memory usage risks, __DO NOT USE__ until new version releases
+
 ## Tools
 
 - `get_interface_topology`: Finds structs that implement a target interface. Supports value and pointer receivers, embedding, package-qualified interface names, stdlib filtering, source locations, and context anchors.
