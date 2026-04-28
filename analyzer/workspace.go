@@ -52,8 +52,18 @@ func (p *LoadedProgram) CallGraph() *callgraph.Graph {
 type cacheKey string
 
 type cacheEntry struct {
-	key  cacheKey
-	prog *LoadedProgram
+	key      cacheKey
+	rootPath string
+	patterns []string
+	prog     *LoadedProgram
+}
+
+type CacheRecord struct {
+	Key             string   `json:"key"`
+	RootPath        string   `json:"root_path"`
+	PackagePatterns []string `json:"package_patterns"`
+	PackagesLoaded  int      `json:"packages_loaded"`
+	FunctionsLoaded int      `json:"functions_loaded"`
 }
 
 // Workspace is a process-scoped LRU cache of LoadedProgram instances guarded
@@ -90,6 +100,27 @@ func (w *Workspace) Stats() (size int, capacity int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.order.Len(), w.capacity
+}
+
+// Status returns cache size/capacity plus LRU-ordered metadata for entries.
+func (w *Workspace) Status() (size int, capacity int, entries []CacheRecord) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	entries = make([]CacheRecord, 0, w.order.Len())
+	for elem := w.order.Front(); elem != nil; elem = elem.Next() {
+		entry := elem.Value.(*cacheEntry)
+		rec := CacheRecord{
+			Key:             string(entry.key),
+			RootPath:        entry.rootPath,
+			PackagePatterns: append([]string(nil), entry.patterns...),
+			PackagesLoaded:  len(entry.prog.Packages),
+			FunctionsLoaded: len(entry.prog.SSAFuncs),
+		}
+		entries = append(entries, rec)
+	}
+
+	return w.order.Len(), w.capacity, entries
 }
 
 // SplitPatterns turns a comma- or whitespace-separated pattern string into a
@@ -155,7 +186,7 @@ func (w *Workspace) GetOrLoad(dir, pattern string) (*LoadedProgram, error) {
 			w.order.MoveToFront(elem)
 			return elem.Value.(*cacheEntry).prog, nil
 		}
-		elem := w.order.PushFront(&cacheEntry{key: key, prog: prog})
+		elem := w.order.PushFront(&cacheEntry{key: key, rootPath: dir, patterns: append([]string(nil), patterns...), prog: prog})
 		w.cache[key] = elem
 		w.evictLocked()
 		return prog, nil
@@ -187,6 +218,31 @@ func (w *Workspace) Invalidate(dir, pattern string) {
 		w.order.Remove(elem)
 	}
 	w.mu.Unlock()
+}
+
+// Clear removes a single cached program by key inputs. Returns true when
+// an entry existed and was removed.
+func (w *Workspace) Clear(dir, pattern string) bool {
+	key := makeCacheKey(dir, SplitPatterns(pattern))
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if elem, ok := w.cache[key]; ok {
+		delete(w.cache, key)
+		w.order.Remove(elem)
+		return true
+	}
+	return false
+}
+
+// ClearAll removes all cached programs and returns the number of entries
+// removed.
+func (w *Workspace) ClearAll() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	removed := w.order.Len()
+	w.cache = make(map[cacheKey]*list.Element)
+	w.order = list.New()
+	return removed
 }
 
 func (w *Workspace) Reload(dir, pattern string) (*LoadedProgram, error) {

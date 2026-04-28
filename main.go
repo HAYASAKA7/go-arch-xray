@@ -54,11 +54,22 @@ type CallHierarchyInput struct {
 	MaxDepth        int      `json:"max_depth,omitempty" jsonschema:"Maximum call depth, capped at 3"`
 }
 
+type CallersInput struct {
+	FunctionName    string   `json:"function_name" jsonschema:"Function name to analyze callers for; may be short name or package-qualified"`
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	MaxDepth        int      `json:"max_depth,omitempty" jsonschema:"Maximum caller depth, capped at 8"`
+}
+
 type StructLifecycleInput struct {
 	StructName      string   `json:"struct_name" jsonschema:"Struct type name to trace"`
 	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	DedupeMode      string   `json:"dedupe_mode,omitempty" jsonschema:"Lifecycle dedupe mode: none, function_field, or function_kind_field"`
+	MaxHops         int      `json:"max_hops,omitempty" jsonschema:"Maximum lifecycle hops to return, capped at 20000"`
+	Summary         bool     `json:"summary,omitempty" jsonschema:"Include aggregated summary counts"`
 }
 
 type ConcurrencyRisksInput struct {
@@ -67,11 +78,57 @@ type ConcurrencyRisksInput struct {
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 }
 
+type FindCallPathInput struct {
+	FromFunction    string   `json:"from_function" jsonschema:"Starting function for path search; may be short name or package-qualified"`
+	ToFunction      string   `json:"to_function" jsonschema:"Target function for path search; may be short name or package-qualified"`
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	MaxDepth        int      `json:"max_depth,omitempty" jsonschema:"Maximum path depth, default 8, max 12"`
+	MaxPaths        int      `json:"max_paths,omitempty" jsonschema:"Maximum number of paths to return, default 20, max 100"`
+}
+
+type DetectImportCyclesInput struct {
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+}
+
+type FindReverseDependenciesInput struct {
+	TargetPackage     string   `json:"target_package" jsonschema:"Package path to find dependents for (e.g. github.com/org/repo/internal/core)"`
+	PackagePattern    string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern to restrict search scope"`
+	PackagePatterns   []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to restrict search scope"`
+	RootPath          string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	IncludeTransitive bool     `json:"include_transitive,omitempty" jsonschema:"Also return transitive dependents (packages that depend on dependents)"`
+}
+
+type CacheStatusInput struct{}
+
+type CacheStatusResult struct {
+	CacheSize     int                    `json:"cache_size"`
+	CacheCapacity int                    `json:"cache_capacity"`
+	Entries       []analyzer.CacheRecord `json:"entries"`
+}
+
+type ClearCacheInput struct {
+	All             bool     `json:"all,omitempty" jsonschema:"Clear all cache entries"`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory for targeted clear"`
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern for targeted clear"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns for targeted clear"`
+}
+
+type ClearCacheResult struct {
+	Cleared       int  `json:"cleared"`
+	ClearedAll    bool `json:"cleared_all"`
+	CacheSize     int  `json:"cache_size"`
+	CacheCapacity int  `json:"cache_capacity"`
+}
+
 func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.2.0",
+			Version: "0.3.0",
 		},
 		nil,
 	)
@@ -97,6 +154,11 @@ func main() {
 	}, handleAnalyzeCallHierarchy)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "find_callers",
+		Description: "Find incoming callers for a target function over cached CHA call graph, with depth control and edge labels.",
+	}, handleFindCallers)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "trace_struct_lifecycle",
 		Description: "Trace struct instantiation, field mutation, and interface handoff points across SSA. Scans only functions in the requested (root) packages.",
 	}, handleTraceStructLifecycle)
@@ -105,6 +167,31 @@ func main() {
 		Name:        "detect_concurrency_risks",
 		Description: "Detect heuristic goroutine field mutation risks without visible mutex or atomic protection. Scans only functions in the requested (root) packages.",
 	}, handleDetectConcurrencyRisks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "find_call_path",
+		Description: "Find call paths (reachability) from one function to another via BFS over the CHA call graph. Returns up to max_paths distinct paths.",
+	}, handleFindCallPath)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "detect_import_cycles",
+		Description: "Detect import cycles in the loaded package graph using Tarjan SCC. Returns all cyclic strongly-connected components.",
+	}, handleDetectImportCycles)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "find_reverse_dependencies",
+		Description: "Find which packages directly (or transitively) import a given target package within the loaded program.",
+	}, handleFindReverseDependencies)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cache_status",
+		Description: "Return workspace cache occupancy and LRU entry metadata.",
+	}, handleCacheStatus)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "clear_cache",
+		Description: "Clear cached analysis entries by root/pattern key or clear all entries.",
+	}, handleClearCache)
 
 	stderr.Println("starting go-arch-xray MCP server")
 
@@ -178,6 +265,20 @@ func handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, i
 	return nil, result, nil
 }
 
+func handleFindCallers(ctx context.Context, req *mcp.CallToolRequest, input CallersInput) (*mcp.CallToolResult, *analyzer.CallersResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.FindCallers(workspace, rootPath, pattern, input.FunctionName, input.MaxDepth)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
 func handleTraceStructLifecycle(ctx context.Context, req *mcp.CallToolRequest, input StructLifecycleInput) (*mcp.CallToolResult, *analyzer.StructLifecycleResult, error) {
 	rootPath, err := resolveRootPath(input.RootPath)
 	if err != nil {
@@ -185,7 +286,11 @@ func handleTraceStructLifecycle(ctx context.Context, req *mcp.CallToolRequest, i
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.TraceStructLifecycle(workspace, rootPath, pattern, input.StructName)
+	result, err := analyzer.TraceStructLifecycle(workspace, rootPath, pattern, input.StructName, analyzer.LifecycleOptions{
+		DedupeMode: input.DedupeMode,
+		MaxHops:    input.MaxHops,
+		Summary:    input.Summary,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -204,6 +309,77 @@ func handleDetectConcurrencyRisks(ctx context.Context, req *mcp.CallToolRequest,
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
+}
+
+func handleFindCallPath(ctx context.Context, req *mcp.CallToolRequest, input FindCallPathInput) (*mcp.CallToolResult, *analyzer.FindCallPathResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.FindCallPath(workspace, rootPath, pattern, input.FromFunction, input.ToFunction, input.MaxDepth, input.MaxPaths)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleDetectImportCycles(ctx context.Context, req *mcp.CallToolRequest, input DetectImportCyclesInput) (*mcp.CallToolResult, *analyzer.ImportCyclesResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.DetectImportCycles(workspace, rootPath, pattern)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleFindReverseDependencies(ctx context.Context, req *mcp.CallToolRequest, input FindReverseDependenciesInput) (*mcp.CallToolResult, *analyzer.ReverseDependenciesResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.FindReverseDependencies(workspace, rootPath, pattern, input.TargetPackage, input.IncludeTransitive)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleCacheStatus(ctx context.Context, req *mcp.CallToolRequest, input CacheStatusInput) (*mcp.CallToolResult, *CacheStatusResult, error) {
+	size, capacity, entries := workspace.Status()
+	return nil, &CacheStatusResult{
+		CacheSize:     size,
+		CacheCapacity: capacity,
+		Entries:       entries,
+	}, nil
+}
+
+func handleClearCache(ctx context.Context, req *mcp.CallToolRequest, input ClearCacheInput) (*mcp.CallToolResult, *ClearCacheResult, error) {
+	cleared := 0
+	if input.All {
+		cleared = workspace.ClearAll()
+		size, capacity := workspace.Stats()
+		return nil, &ClearCacheResult{Cleared: cleared, ClearedAll: true, CacheSize: size, CacheCapacity: capacity}, nil
+	}
+
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+	if workspace.Clear(rootPath, pattern) {
+		cleared = 1
+	}
+	size, capacity := workspace.Stats()
+	return nil, &ClearCacheResult{Cleared: cleared, ClearedAll: false, CacheSize: size, CacheCapacity: capacity}, nil
 }
 
 func toolError(err error) *mcp.CallToolResult {

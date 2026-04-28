@@ -10,8 +10,25 @@ import (
 )
 
 type StructLifecycleResult struct {
-	Struct string         `json:"struct"`
-	Hops   []LifecycleHop `json:"hops"`
+	Struct              string            `json:"struct"`
+	DedupeMode          string            `json:"dedupe_mode,omitempty"`
+	MaxHops             int               `json:"max_hops"`
+	TotalBeforeTruncate int               `json:"total_before_truncate,omitempty"`
+	Truncated           bool              `json:"truncated,omitempty"`
+	Summary             *LifecycleSummary `json:"summary,omitempty"`
+	Hops                []LifecycleHop    `json:"hops"`
+}
+
+type LifecycleSummary struct {
+	TotalByKind     map[string]int `json:"total_by_kind"`
+	TotalByFunction map[string]int `json:"total_by_function"`
+	TotalByField    map[string]int `json:"total_by_field,omitempty"`
+}
+
+type LifecycleOptions struct {
+	DedupeMode string
+	MaxHops    int
+	Summary    bool
 }
 
 type LifecycleHop struct {
@@ -25,17 +42,18 @@ type LifecycleHop struct {
 	Anchor   string `json:"context_anchor,omitempty"`
 }
 
-func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string) (*StructLifecycleResult, error) {
+func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string, opts LifecycleOptions) (*StructLifecycleResult, error) {
 	if strings.TrimSpace(structName) == "" {
 		return nil, fmt.Errorf("struct name is required")
 	}
+	opts = normalizeLifecycleOptions(opts)
 
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
-	result := &StructLifecycleResult{Struct: structName}
+	result := &StructLifecycleResult{Struct: structName, DedupeMode: opts.DedupeMode, MaxHops: opts.MaxHops}
 	for _, fn := range prog.SSAFuncs {
 		if fn == nil {
 			continue
@@ -77,7 +95,80 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string) (*Stru
 		return result.Hops[i].Kind < result.Hops[j].Kind
 	})
 
+	result.Hops = dedupeLifecycleHops(result.Hops, opts.DedupeMode)
+	if opts.Summary {
+		result.Summary = summarizeLifecycleHops(result.Hops)
+	}
+
+	result.TotalBeforeTruncate = len(result.Hops)
+	if len(result.Hops) > opts.MaxHops {
+		result.Hops = result.Hops[:opts.MaxHops]
+		result.Truncated = true
+	}
+
 	return result, nil
+}
+
+func normalizeLifecycleOptions(opts LifecycleOptions) LifecycleOptions {
+	mode := strings.TrimSpace(opts.DedupeMode)
+	switch mode {
+	case "", "none":
+		mode = "none"
+	case "function_field", "function_kind_field":
+		// valid
+	default:
+		mode = "function_kind_field"
+	}
+	maxHops := opts.MaxHops
+	if maxHops <= 0 {
+		maxHops = 500
+	}
+	if maxHops > 20000 {
+		maxHops = 20000
+	}
+	return LifecycleOptions{DedupeMode: mode, MaxHops: maxHops, Summary: opts.Summary}
+}
+
+func dedupeLifecycleHops(hops []LifecycleHop, mode string) []LifecycleHop {
+	if mode == "none" {
+		return hops
+	}
+	out := make([]LifecycleHop, 0, len(hops))
+	seen := make(map[string]bool, len(hops))
+	for _, hop := range hops {
+		var key string
+		switch mode {
+		case "function_field":
+			key = hop.Function + "|" + hop.Field
+		default:
+			key = hop.Function + "|" + hop.Kind + "|" + hop.Field
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, hop)
+	}
+	return out
+}
+
+func summarizeLifecycleHops(hops []LifecycleHop) *LifecycleSummary {
+	summary := &LifecycleSummary{
+		TotalByKind:     make(map[string]int),
+		TotalByFunction: make(map[string]int),
+		TotalByField:    make(map[string]int),
+	}
+	for _, hop := range hops {
+		summary.TotalByKind[hop.Kind]++
+		summary.TotalByFunction[hop.Function]++
+		if hop.Field != "" {
+			summary.TotalByField[hop.Field]++
+		}
+	}
+	if len(summary.TotalByField) == 0 {
+		summary.TotalByField = nil
+	}
+	return summary
 }
 
 func lifecycleHop(prog *LoadedProgram, fn *ssa.Function, instr ssa.Instruction, kind, structName, field, detail string) LifecycleHop {

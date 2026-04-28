@@ -21,7 +21,7 @@ func NewUser() *User {
 	})
 
 	ws := NewWorkspace()
-	result, err := TraceStructLifecycle(ws, dir, "./...", "User")
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,7 +46,7 @@ func (u *User) Rename(name string) {
 	})
 
 	ws := NewWorkspace()
-	result, err := TraceStructLifecycle(ws, dir, "./...", "User")
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,13 +71,75 @@ func Run() {
 	})
 
 	ws := NewWorkspace()
-	result, err := TraceStructLifecycle(ws, dir, "./...", "User")
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if !hasLifecycleHop(result, "InterfaceHandoff", "", "Run") {
 		t.Fatalf("missing InterfaceHandoff hop: %#v", result)
+	}
+}
+
+func TestTraceStructLifecycle_AppliesDedupeAndSummary(t *testing.T) {
+	dir := createLifecycleTestModule(t, "lifededupe", map[string]string{
+		"main.go": `package main
+
+type User struct{ Name string }
+
+func Run(u *User, name string) {
+	u.Name = name
+	u.Name = name + "x"
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{
+		DedupeMode: "function_kind_field",
+		Summary:    true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Summary == nil {
+		t.Fatal("expected summary in lifecycle result")
+	}
+	if result.Summary.TotalByField["Name"] != 1 {
+		t.Fatalf("expected deduped Name mutation count 1, got %#v", result.Summary.TotalByField)
+	}
+}
+
+func TestTraceStructLifecycle_AppliesMaxHopsTruncation(t *testing.T) {
+	dir := createLifecycleTestModule(t, "lifetruncate", map[string]string{
+		"main.go": `package main
+
+type User struct{ Name string }
+
+func Run(u *User) {
+	u.Name = "a"
+	u.Name = "b"
+	u.Name = "c"
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{
+		DedupeMode: "none",
+		MaxHops:    1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated lifecycle result")
+	}
+	if result.TotalBeforeTruncate <= 1 {
+		t.Fatalf("expected total_before_truncate > 1, got %d", result.TotalBeforeTruncate)
+	}
+	if len(result.Hops) != 1 {
+		t.Fatalf("expected 1 hop after truncation, got %d", len(result.Hops))
 	}
 }
 

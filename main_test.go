@@ -130,6 +130,7 @@ func TestHandleTraceStructLifecycle_ReturnsStructuredHops(t *testing.T) {
 	toolResult, result, err := handleTraceStructLifecycle(context.Background(), nil, StructLifecycleInput{
 		RootPath:   dir,
 		StructName: "User",
+		Summary:    true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected handler error: %v", err)
@@ -139,6 +140,9 @@ func TestHandleTraceStructLifecycle_ReturnsStructuredHops(t *testing.T) {
 	}
 	if result == nil || !mainHasLifecycleHop(result, "Instantiate") {
 		t.Fatalf("expected Instantiate hop, got %#v", result)
+	}
+	if result.Summary == nil {
+		t.Fatal("expected lifecycle summary")
 	}
 }
 
@@ -179,6 +183,57 @@ func TestHandleDetectConcurrencyRisks_ReturnsStructuredRisks(t *testing.T) {
 	}
 	if result == nil || !mainHasConcurrencyRisk(result, "High") {
 		t.Fatalf("expected high concurrency risk, got %#v", result)
+	}
+}
+
+func TestHandleFindCallers_ReturnsIncomingEdges(t *testing.T) {
+	dir := createMainTestModule(t, "handlercallers", map[string]string{
+		"main.go": "package main\n\nfunc Root() { Worker() }\nfunc Worker() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleFindCallers(context.Background(), nil, CallersInput{
+		RootPath:     dir,
+		FunctionName: "Worker",
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured callers success, got %#v", toolResult)
+	}
+	if result == nil || len(result.Edges) == 0 {
+		t.Fatalf("expected caller edges, got %#v", result)
+	}
+}
+
+func TestHandleCacheStatusAndClearCache(t *testing.T) {
+	dir := createMainTestModule(t, "handlercache", map[string]string{
+		"main.go": "package main\n\nfunc Root() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("initial load failed: %v", err)
+	}
+
+	_, status, err := handleCacheStatus(context.Background(), nil, CacheStatusInput{})
+	if err != nil {
+		t.Fatalf("cache status failed: %v", err)
+	}
+	if status == nil || status.CacheSize == 0 {
+		t.Fatalf("expected non-empty cache status, got %#v", status)
+	}
+
+	_, clearRes, err := handleClearCache(context.Background(), nil, ClearCacheInput{All: true})
+	if err != nil {
+		t.Fatalf("clear cache failed: %v", err)
+	}
+	if clearRes == nil || clearRes.Cleared == 0 {
+		t.Fatalf("expected cleared entries, got %#v", clearRes)
+	}
+	if clearRes.CacheSize != 0 {
+		t.Fatalf("expected empty cache after clear-all, got %#v", clearRes)
 	}
 }
 

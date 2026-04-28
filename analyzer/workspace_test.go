@@ -137,6 +137,46 @@ func Version() string { return "v2" }
 	}
 }
 
+func TestWorkspaceStatusAndClear(t *testing.T) {
+	ws := NewWorkspace()
+	dir := createTestModule(t, "statusclear", `package main
+
+func Hello() string { return "hi" }
+`)
+
+	if _, err := ws.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+
+	size, capacity, entries := ws.Status()
+	if size != 1 {
+		t.Fatalf("expected cache size 1, got %d", size)
+	}
+	if capacity < 1 {
+		t.Fatalf("expected capacity >= 1, got %d", capacity)
+	}
+	if len(entries) != 1 || entries[0].RootPath != dir {
+		t.Fatalf("unexpected cache entries: %#v", entries)
+	}
+
+	if !ws.Clear(dir, "./...") {
+		t.Fatal("expected targeted clear to remove entry")
+	}
+	if size, _, _ := ws.Status(); size != 0 {
+		t.Fatalf("expected empty cache after targeted clear, got %d", size)
+	}
+
+	if _, err := ws.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("reload after clear failed: %v", err)
+	}
+	if removed := ws.ClearAll(); removed != 1 {
+		t.Fatalf("expected clear-all to remove 1 entry, got %d", removed)
+	}
+	if size, _, _ := ws.Status(); size != 0 {
+		t.Fatalf("expected empty cache after clear-all, got %d", size)
+	}
+}
+
 func createTestModule(t *testing.T, name, code string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
