@@ -5,7 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.1] - 2026-04-28
+## [0.4.0] - 2026-04-28
+
+### Added
+- `check_architecture_boundaries` tool: evaluates every package's import
+  graph against a configurable ruleset. Supports three rule types:
+  - `forbid` — any import from a `from`-matching package to a `to`-matching
+    package is a violation.
+  - `allow_only` — packages matching `from` may only import packages
+    matching `to` (intra-project; stdlib is always permitted).
+  - `allow_prefix` — packages matching `from` may only import packages
+    whose path starts with `to` (intra-project; stdlib is always permitted).
+  Each violation includes `from`, `import`, `rule`, source `file`, `line`,
+  and `context_anchor`. Pattern matching supports exact paths or
+  trailing-`/` prefix patterns.
+- `list_entrypoints` tool: scans the SSA program for `main` functions,
+  `init` functions, and goroutine spawn sites (`go` statements). Returns
+  kind, function name, package, and source location for each entrypoint.
+- `list_http_routes` tool: scans source files via AST for HTTP route
+  registrations from `net/http`, gin (`r.GET`, `r.POST`, …), chi
+  (`r.Get`, `r.Post`, …), and gorilla/mux. Returns HTTP method, path,
+  handler name, inferred framework, and source location. Dynamic paths
+  (non-literal first argument) are silently skipped.
+- `analyzer.BoundaryRule` / `BoundaryViolation` / `BoundaryResult` types.
+- `analyzer.Entrypoint` / `EntrypointsResult` types.
+- `analyzer.HTTPRoute` / `HTTPRoutesResult` types.
+
+### Changed
+- Server version bumped to `0.4.0`.
+
+
 
 ### Added
 - Shared query/output controls for high-volume tools:

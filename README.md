@@ -2,7 +2,13 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.3.1)
+## What's New (0.4.0)
+
+- **Architecture boundary enforcement**: `check_architecture_boundaries` evaluates your package import graph against a configurable ruleset. Three rule types are supported: `forbid` (a specific import is never allowed), `allow_only` (a layer may only import one specific package), and `allow_prefix` (a layer may only import packages under a given path prefix). Violations include file and line locations.
+- **Entrypoint discovery**: `list_entrypoints` scans the SSA program for `main` functions, `init` functions, and goroutine spawn sites, returning kind, function, package, and source location for each.
+- **HTTP route scanning**: `list_http_routes` scans source files for route registrations from `net/http`, gin, chi, gorilla/mux, and similar router APIs. Returns HTTP method, path, handler, inferred framework, and source location for routes with literal string paths.
+
+## What Was New (0.3.1)
 
 - **Unified query controls for large outputs**: high-volume tools now share the same request knobs: `limit`, `offset`, `summary`, and `max_items`.
 - **Consistent truncation metadata**: paged/truncated results consistently report `total_before_truncate` and `truncated`.
@@ -42,6 +48,7 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `get_package_dependencies`: Returns direct package import dependencies for architecture boundary inspection.
 - `find_reverse_dependencies`: Returns packages that import a given target package. Optionally includes the transitive dependent closure.
 - `detect_import_cycles`: Detects import cycles in the loaded package graph using Tarjan SCC. Returns all cyclic strongly-connected components.
+- `check_architecture_boundaries`: Evaluates packages against a configurable ruleset (`forbid`, `allow_only`, `allow_prefix`). Intra-project violations are reported with file/line locations. Stdlib is always permitted in allow-type rules.
 
 ### Struct Analysis
 
@@ -54,6 +61,8 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
 - `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
+- `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
+- `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux). Returns route method, path, handler, framework, and source location for literal-path routes.
 
 ## Install From GitHub Releases
 

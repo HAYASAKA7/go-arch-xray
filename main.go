@@ -115,6 +115,25 @@ type FindReverseDependenciesInput struct {
 
 type CacheStatusInput struct{}
 
+type CheckArchitectureBoundariesInput struct {
+	Rules           []analyzer.BoundaryRule `json:"rules" jsonschema:"Boundary rules to evaluate; each rule has type (forbid|allow_only|allow_prefix), from (package pattern), and to (package pattern)"`
+	PackagePattern  string                  `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string                `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to restrict evaluation scope; defaults to ./..."`
+	RootPath        string                  `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+}
+
+type ListEntrypointsInput struct {
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+}
+
+type ListHTTPRoutesInput struct {
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+}
+
 type CacheStatusResult struct {
 	CacheSize     int                    `json:"cache_size"`
 	CacheCapacity int                    `json:"cache_capacity"`
@@ -139,7 +158,7 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.3.1",
+			Version: "0.4.0",
 		},
 		nil,
 	)
@@ -203,6 +222,21 @@ func main() {
 		Name:        "clear_cache",
 		Description: "Clear cached analysis entries by root/pattern key or clear all entries.",
 	}, handleClearCache)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "check_architecture_boundaries",
+		Description: "Evaluate package import graph against a set of architecture boundary rules. Supports forbid, allow_only, and allow_prefix rule types. Only intra-project imports are evaluated for allow-type rules; stdlib is always permitted.",
+	}, handleCheckArchitectureBoundaries)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_entrypoints",
+		Description: "List program entrypoints: main functions, init functions, and goroutine spawn sites across the loaded packages.",
+	}, handleListEntrypoints)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_http_routes",
+		Description: "Scan source files for HTTP route registrations from net/http, gin, chi, gorilla/mux, and similar router APIs. Returns route method, path, handler, and source location for routes whose path is a string literal.",
+	}, handleListHTTPRoutes)
 
 	stderr.Println("starting go-arch-xray MCP server")
 
@@ -404,6 +438,48 @@ func handleClearCache(ctx context.Context, req *mcp.CallToolRequest, input Clear
 	}
 	size, capacity := workspace.Stats()
 	return nil, &ClearCacheResult{Cleared: cleared, ClearedAll: false, CacheSize: size, CacheCapacity: capacity}, nil
+}
+
+func handleCheckArchitectureBoundaries(ctx context.Context, req *mcp.CallToolRequest, input CheckArchitectureBoundariesInput) (*mcp.CallToolResult, *analyzer.BoundaryResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.CheckArchitectureBoundaries(workspace, rootPath, pattern, input.Rules)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleListEntrypoints(ctx context.Context, req *mcp.CallToolRequest, input ListEntrypointsInput) (*mcp.CallToolResult, *analyzer.EntrypointsResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.ListEntrypoints(workspace, rootPath, pattern)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleListHTTPRoutes(ctx context.Context, req *mcp.CallToolRequest, input ListHTTPRoutesInput) (*mcp.CallToolResult, *analyzer.HTTPRoutesResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.ListHTTPRoutes(workspace, rootPath, pattern)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
 }
 
 func toolError(err error) *mcp.CallToolResult {
