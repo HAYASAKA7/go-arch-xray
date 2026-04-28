@@ -12,9 +12,22 @@ import (
 const defaultCallHierarchyMaxDepth = 3
 
 type CallHierarchyResult struct {
-	RootFunction string     `json:"root_function"`
-	MaxDepth     int        `json:"max_depth"`
-	Edges        []CallEdge `json:"edges"`
+	RootFunction        string                `json:"root_function"`
+	MaxDepth            int                   `json:"max_depth"`
+	Offset              int                   `json:"offset,omitempty"`
+	Limit               int                   `json:"limit,omitempty"`
+	MaxItems            int                   `json:"max_items,omitempty"`
+	TotalBeforeTruncate int                   `json:"total_before_truncate,omitempty"`
+	Truncated           bool                  `json:"truncated,omitempty"`
+	Summary             *CallHierarchySummary `json:"summary,omitempty"`
+	Edges               []CallEdge            `json:"edges"`
+}
+
+type CallHierarchySummary struct {
+	TotalEdges int            `json:"total_edges"`
+	ByCallType map[string]int `json:"by_call_type"`
+	ByCaller   map[string]int `json:"by_caller"`
+	ByCallee   map[string]int `json:"by_callee"`
 }
 
 type CallEdge struct {
@@ -28,6 +41,10 @@ type CallEdge struct {
 }
 
 func AnalyzeCallHierarchy(ws *Workspace, dir, pattern, functionName string, maxDepth int) (*CallHierarchyResult, error) {
+	return AnalyzeCallHierarchyWithOptions(ws, dir, pattern, functionName, maxDepth, QueryOptions{})
+}
+
+func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName string, maxDepth int, opts QueryOptions) (*CallHierarchyResult, error) {
 	if strings.TrimSpace(functionName) == "" {
 		return nil, fmt.Errorf("function name is required")
 	}
@@ -54,6 +71,9 @@ func AnalyzeCallHierarchy(ws *Workspace, dir, pattern, functionName string, maxD
 	result := &CallHierarchyResult{
 		RootFunction: root.String(),
 		MaxDepth:     maxDepth,
+		Offset:       opts.Offset,
+		Limit:        opts.Limit,
+		MaxItems:     opts.MaxItems,
 	}
 
 	seenEdges := make(map[string]bool)
@@ -92,7 +112,31 @@ func AnalyzeCallHierarchy(ws *Workspace, dir, pattern, functionName string, maxD
 		return result.Edges[i].Callee < result.Edges[j].Callee
 	})
 
+	result.Summary = summarizeCallEdges(result.Edges, opts.Summary)
+	window, total, truncated := applyQueryWindow(result.Edges, opts)
+	result.TotalBeforeTruncate = total
+	result.Truncated = truncated
+	result.Edges = window
+
 	return result, nil
+}
+
+func summarizeCallEdges(edges []CallEdge, enabled bool) *CallHierarchySummary {
+	if !enabled {
+		return nil
+	}
+	s := &CallHierarchySummary{
+		TotalEdges: len(edges),
+		ByCallType: make(map[string]int),
+		ByCaller:   make(map[string]int),
+		ByCallee:   make(map[string]int),
+	}
+	for _, edge := range edges {
+		s.ByCallType[edge.CallType]++
+		s.ByCaller[edge.Caller]++
+		s.ByCallee[edge.Callee]++
+	}
+	return s
 }
 
 func findFunction(funcs []*ssa.Function, name string) (*ssa.Function, error) {

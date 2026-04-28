@@ -89,6 +89,34 @@ func Worker() {}
 	}
 }
 
+func TestAnalyzeCallHierarchyWithOptions_AppliesLimitOffsetAndSummary(t *testing.T) {
+	dir := createCallHierarchyTestModule(t, "callopts", map[string]string{
+		"main.go": `package main
+
+func Root() { A(); X() }
+func A() { B() }
+func B() {}
+func X() { Y() }
+func Y() {}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := AnalyzeCallHierarchyWithOptions(ws, dir, "./...", "Root", 3, QueryOptions{Offset: 1, Limit: 2, Summary: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Summary == nil || result.Summary.TotalEdges == 0 {
+		t.Fatal("expected non-empty call hierarchy summary")
+	}
+	if result.TotalBeforeTruncate <= len(result.Edges) {
+		t.Fatalf("expected pagination/truncation to reduce edge count, total=%d window=%d", result.TotalBeforeTruncate, len(result.Edges))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated=true when offset/limit applied")
+	}
+}
+
 func hasCallEdge(r *CallHierarchyResult, caller, callee, callType string) bool {
 	for _, edge := range r.Edges {
 		if shortFuncName(edge.Caller) == caller && shortFuncName(edge.Callee) == callee && edge.CallType == callType {

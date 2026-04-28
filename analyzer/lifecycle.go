@@ -29,6 +29,9 @@ type LifecycleOptions struct {
 	DedupeMode string
 	MaxHops    int
 	Summary    bool
+	Limit      int
+	Offset     int
+	MaxItems   int
 }
 
 type LifecycleHop struct {
@@ -100,11 +103,16 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string, opts L
 		result.Summary = summarizeLifecycleHops(result.Hops)
 	}
 
-	result.TotalBeforeTruncate = len(result.Hops)
+	totalBeforeAnyCut := len(result.Hops)
+	result.TotalBeforeTruncate = totalBeforeAnyCut
 	if len(result.Hops) > opts.MaxHops {
 		result.Hops = result.Hops[:opts.MaxHops]
 		result.Truncated = true
 	}
+
+	window, _, truncated := applyQueryWindow(result.Hops, QueryOptions{Limit: opts.Limit, Offset: opts.Offset, MaxItems: opts.MaxItems, Summary: opts.Summary})
+	result.Truncated = result.Truncated || truncated
+	result.Hops = window
 
 	return result, nil
 }
@@ -126,7 +134,8 @@ func normalizeLifecycleOptions(opts LifecycleOptions) LifecycleOptions {
 	if maxHops > 20000 {
 		maxHops = 20000
 	}
-	return LifecycleOptions{DedupeMode: mode, MaxHops: maxHops, Summary: opts.Summary}
+	qo := normalizeQueryOptions(QueryOptions{Limit: opts.Limit, Offset: opts.Offset, MaxItems: opts.MaxItems, Summary: opts.Summary})
+	return LifecycleOptions{DedupeMode: mode, MaxHops: maxHops, Summary: opts.Summary, Limit: qo.Limit, Offset: qo.Offset, MaxItems: qo.MaxItems}
 }
 
 func dedupeLifecycleHops(hops []LifecycleHop, mode string) []LifecycleHop {

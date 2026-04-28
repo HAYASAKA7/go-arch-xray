@@ -143,6 +143,43 @@ func Run(u *User) {
 	}
 }
 
+func TestTraceStructLifecycle_AppliesLimitOffsetAndMaxItems(t *testing.T) {
+	dir := createLifecycleTestModule(t, "lifepage", map[string]string{
+		"main.go": `package main
+
+type User struct{ Name string }
+
+func Run(u *User) {
+	u.Name = "a"
+	u.Name = "b"
+	u.Name = "c"
+	u.Name = "d"
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{
+		DedupeMode: "none",
+		MaxHops:    100,
+		Offset:     1,
+		Limit:      2,
+		MaxItems:   2,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalBeforeTruncate <= len(result.Hops) {
+		t.Fatalf("expected query window to reduce hop count, total=%d window=%d", result.TotalBeforeTruncate, len(result.Hops))
+	}
+	if len(result.Hops) != 2 {
+		t.Fatalf("expected exactly 2 hops after offset+limit, got %d", len(result.Hops))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated=true when offset/limit applied")
+	}
+}
+
 func hasLifecycleHop(r *StructLifecycleResult, kind, field, function string) bool {
 	for _, hop := range r.Hops {
 		if hop.Kind != kind {

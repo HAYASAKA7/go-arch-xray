@@ -29,6 +29,10 @@ type PackageDependenciesInput struct {
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; merged with package_pattern. Defaults to ./..."`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 	IncludeStdlib   bool     `json:"include_stdlib,omitempty" jsonschema:"Include standard library imports"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Summary         bool     `json:"summary,omitempty" jsonschema:"Include aggregated summary counts"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 }
 
 type ReloadWorkspaceInput struct {
@@ -52,6 +56,10 @@ type CallHierarchyInput struct {
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 	MaxDepth        int      `json:"max_depth,omitempty" jsonschema:"Maximum call depth, capped at 3"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum edges to return"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Summary         bool     `json:"summary,omitempty" jsonschema:"Include aggregated summary counts"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned edges"`
 }
 
 type CallersInput struct {
@@ -70,6 +78,9 @@ type StructLifecycleInput struct {
 	DedupeMode      string   `json:"dedupe_mode,omitempty" jsonschema:"Lifecycle dedupe mode: none, function_field, or function_kind_field"`
 	MaxHops         int      `json:"max_hops,omitempty" jsonschema:"Maximum lifecycle hops to return, capped at 20000"`
 	Summary         bool     `json:"summary,omitempty" jsonschema:"Include aggregated summary counts"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum hops to return after dedupe"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination after dedupe"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned hops"`
 }
 
 type ConcurrencyRisksInput struct {
@@ -128,7 +139,7 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.3.0",
+			Version: "0.3.1",
 		},
 		nil,
 	)
@@ -221,7 +232,12 @@ func handlePackageDependencies(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.GetPackageDependencies(workspace, rootPath, pattern, input.IncludeStdlib)
+	result, err := analyzer.GetPackageDependenciesWithOptions(workspace, rootPath, pattern, input.IncludeStdlib, analyzer.QueryOptions{
+		Limit:    input.Limit,
+		Offset:   input.Offset,
+		Summary:  input.Summary,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -258,7 +274,12 @@ func handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, i
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.AnalyzeCallHierarchy(workspace, rootPath, pattern, input.FunctionName, input.MaxDepth)
+	result, err := analyzer.AnalyzeCallHierarchyWithOptions(workspace, rootPath, pattern, input.FunctionName, input.MaxDepth, analyzer.QueryOptions{
+		Limit:    input.Limit,
+		Offset:   input.Offset,
+		Summary:  input.Summary,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -290,6 +311,9 @@ func handleTraceStructLifecycle(ctx context.Context, req *mcp.CallToolRequest, i
 		DedupeMode: input.DedupeMode,
 		MaxHops:    input.MaxHops,
 		Summary:    input.Summary,
+		Limit:      input.Limit,
+		Offset:     input.Offset,
+		MaxItems:   input.MaxItems,
 	})
 	if err != nil {
 		return toolError(err), nil, nil

@@ -109,6 +109,29 @@ func TestGetPackageDependencies_IncludesContextAnchors(t *testing.T) {
 	t.Fatal("missing depanchors/app package")
 }
 
+func TestGetPackageDependenciesWithOptions_AppliesLimitOffsetAndSummary(t *testing.T) {
+	dir := createDependencyTestModule(t, "depopts", map[string]string{
+		"a/a.go": "package a\n\nimport \"depopts/b\"\n\nfunc A() { b.B() }\n",
+		"b/b.go": "package b\n\nfunc B() {}\n",
+		"c/c.go": "package c\n\nfunc C() {}\n",
+	})
+
+	ws := NewWorkspace()
+	result, err := GetPackageDependenciesWithOptions(ws, dir, "./...", false, QueryOptions{Offset: 1, Limit: 1, Summary: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Summary == nil || result.Summary.TotalPackages == 0 {
+		t.Fatal("expected non-empty dependency summary")
+	}
+	if result.TotalBeforeTruncate <= len(result.Packages) {
+		t.Fatalf("expected pagination/truncation to reduce package count, total=%d window=%d", result.TotalBeforeTruncate, len(result.Packages))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated=true when offset/limit applied")
+	}
+}
+
 func hasPackage(r *DependencyResult, pkg string) bool {
 	for _, node := range r.Packages {
 		if node.Package == pkg {

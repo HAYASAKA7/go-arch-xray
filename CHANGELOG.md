@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-28
+
+### Added
+- Shared query/output controls for high-volume tools:
+  - `limit`
+  - `offset`
+  - `summary`
+  - `max_items`
+- `analyze_call_hierarchy` now supports optional aggregate summary output
+  (`total_edges`, grouped counters by call type/caller/callee).
+- `get_package_dependencies` now supports optional aggregate summary output
+  (`total_packages`, `total_imports`, per-package import counts).
+
+### Changed
+- Output throttling/pagination behavior is now standardized across call
+  hierarchy, dependency, and lifecycle-style large result sets.
+- Truncation metadata is now consistently populated with
+  `total_before_truncate` and `truncated` where applicable.
+- Server version bumped to `0.3.1`.
+
 ## [0.3.0] - 2026-04-28
 
 ### Added

@@ -2,7 +2,13 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.3.x)
+## What's New (0.3.1)
+
+- **Unified query controls for large outputs**: high-volume tools now share the same request knobs: `limit`, `offset`, `summary`, and `max_items`.
+- **Consistent truncation metadata**: paged/truncated results consistently report `total_before_truncate` and `truncated`.
+- **Call hierarchy and dependency summaries**: `analyze_call_hierarchy` and `get_package_dependencies` support optional aggregate summaries for faster high-level inspection.
+
+## What Was New (0.3.0)
 
 - **Call path queries**: `find_call_path` performs BFS over the CHA call graph to find all paths from one function to another (`from_function` → `to_function`), with `max_depth` and `max_paths` controls.
 - **Reverse callers**: `find_callers` returns the incoming caller tree for any function, up to `max_depth` hops, with the same edge labels (`Static`, `Interface`, `Goroutine`) as the forward hierarchy tool.
@@ -134,8 +140,8 @@ If you downloaded a release asset, the extracted binary name includes the target
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.
@@ -147,6 +153,13 @@ Most tools accept:
 - `root_path`: Root directory of the Go project. Defaults to the server working directory.
 - `package_pattern`: Single Go package pattern. Also accepts a comma-separated list. Defaults to `./...`.
 - `package_patterns`: Array of Go package patterns. Merged with `package_pattern` (deduplicated). Use this for multi-module / multi-subtree scans in one request.
+
+High-volume tools also accept:
+
+- `limit`: Maximum number of items returned.
+- `offset`: Pagination start index.
+- `summary`: Return aggregate counts in addition to detailed entries.
+- `max_items`: Hard cap safety limit on returned items.
 
 Multi-pattern example for `get_interface_topology`:
 

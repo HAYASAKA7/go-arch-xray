@@ -16,16 +16,35 @@ type PackageDependency struct {
 }
 
 type DependencyResult struct {
-	Packages []PackageDependency `json:"packages"`
+	Offset              int                 `json:"offset,omitempty"`
+	Limit               int                 `json:"limit,omitempty"`
+	MaxItems            int                 `json:"max_items,omitempty"`
+	TotalBeforeTruncate int                 `json:"total_before_truncate,omitempty"`
+	Truncated           bool                `json:"truncated,omitempty"`
+	Summary             *DependencySummary  `json:"summary,omitempty"`
+	Packages            []PackageDependency `json:"packages"`
+}
+
+type DependencySummary struct {
+	TotalPackages int            `json:"total_packages"`
+	TotalImports  int            `json:"total_imports"`
+	ByPackage     map[string]int `json:"imports_by_package"`
 }
 
 func GetPackageDependencies(ws *Workspace, dir, pattern string, includeStdlib bool) (*DependencyResult, error) {
+	return GetPackageDependenciesWithOptions(ws, dir, pattern, includeStdlib, QueryOptions{})
+}
+
+func GetPackageDependenciesWithOptions(ws *Workspace, dir, pattern string, includeStdlib bool, opts QueryOptions) (*DependencyResult, error) {
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
 	result := &DependencyResult{
+		Offset:   opts.Offset,
+		Limit:    opts.Limit,
+		MaxItems: opts.MaxItems,
 		Packages: make([]PackageDependency, 0, len(prog.Packages)),
 	}
 
@@ -66,7 +85,28 @@ func GetPackageDependencies(ws *Workspace, dir, pattern string, includeStdlib bo
 		return result.Packages[i].Package < result.Packages[j].Package
 	})
 
+	result.Summary = summarizeDependencies(result.Packages, opts.Summary)
+	window, total, truncated := applyQueryWindow(result.Packages, opts)
+	result.TotalBeforeTruncate = total
+	result.Truncated = truncated
+	result.Packages = window
+
 	return result, nil
+}
+
+func summarizeDependencies(packages []PackageDependency, enabled bool) *DependencySummary {
+	if !enabled {
+		return nil
+	}
+	summary := &DependencySummary{
+		TotalPackages: len(packages),
+		ByPackage:     make(map[string]int, len(packages)),
+	}
+	for _, pkg := range packages {
+		summary.TotalImports += len(pkg.Imports)
+		summary.ByPackage[pkg.Package] = len(pkg.Imports)
+	}
+	return summary
 }
 
 func packageAnchorLocation(pkg *packages.Package) (string, int) {
