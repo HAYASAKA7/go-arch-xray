@@ -2,13 +2,11 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.4.3)
+## What's New (0.4.4)
 
-- **More reliable function resolution in mixed-module workspaces**: `analyze_call_hierarchy`, `find_callers`, and `find_call_path` now retry function lookup with broader fallback patterns when a narrow package pattern does not load the target symbol.
-- **go.work-aware fallback loading**: fallback pattern discovery now reads `go.work` `use` directives so sub-module packages can be analyzed when the workspace root and module roots differ.
-- **Better function name matching**: function lookup now supports receiver-qualified method forms and case-insensitive fallback matching (for example `syncOrganization` to `SyncOrganization`) while preserving explicit ambiguity errors.
-- **Actionable ambiguity errors**: when multiple functions match, the error now includes candidate fully-qualified function names to guide immediate retry with package or receiver qualification.
-- **Pattern and output correctness fixes**: filesystem-like `package_pattern` values are normalized, empty paginated results now serialize as `[]` (not `null`), and stdlib filtering now checks module metadata to avoid misclassifying local imports in dotless module paths.
+- **Interface topology fallback for narrow patterns**: `get_interface_topology` now retries lookup with broader fallback package patterns (including go.work-derived module patterns) when an interface cannot be found under a narrow `package_pattern`.
+- **More resilient interface resolution flow**: fallback triggers only for true not-found interface errors, preserving existing explicit error behavior for invalid type names.
+- **Regression coverage added**: new test verifies that a fully-qualified interface in a dependency package is resolved even when the initial pattern scans only the implementor package.
 
 ## Memory note
 
@@ -128,8 +126,8 @@ If you downloaded a release asset, the extracted binary name includes the target
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.4.3
-git push origin v0.4.3
+git tag v0.4.4
+git push origin v0.4.4
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.

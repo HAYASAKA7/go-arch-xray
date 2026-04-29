@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-04-29
+
+### Added
+
+- `get_interface_topology` regression test for narrow-pattern fallback:
+  fully-qualified dependency interface lookup now has explicit coverage.
+
+### Changed
+
+- `get_interface_topology` now retries interface resolution with workspace
+  fallback patterns (`./...` and go.work-derived module patterns) when the
+  initial lookup fails with interface-not-found errors under narrow package
+  patterns.
+- Server version bumped to `0.4.4`.
+
 ## [0.4.3] - 2026-04-29
 
 ### Added

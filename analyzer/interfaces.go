@@ -49,6 +49,25 @@ func GetInterfaceTopologyWithOptions(ws *Workspace, dir, pattern, ifaceName stri
 	loaded := AllLoadedPackages(prog.Packages)
 
 	iface, err := findInterface(loaded, prog.Packages, ifaceName)
+	if err != nil && isInterfaceNotFoundError(err) {
+		for _, fp := range WorkspaceFallbackPatterns(dir) {
+			if fp == pattern {
+				continue
+			}
+			broadProg, berr := ws.GetOrLoad(dir, fp)
+			if berr != nil {
+				continue
+			}
+			broadLoaded := AllLoadedPackages(broadProg.Packages)
+			if broadIface, ferr := findInterface(broadLoaded, broadProg.Packages, ifaceName); ferr == nil {
+				prog = broadProg
+				loaded = broadLoaded
+				iface = broadIface
+				err = nil
+				break
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +136,15 @@ func findInterface(loaded map[string]*packages.Package, roots []*packages.Packag
 		return iface, nil
 	}
 	return nil, fmt.Errorf("interface %s not found in loaded root packages; pass a fully-qualified name (pkgpath.Name) to search dependencies", name)
+}
+
+func isInterfaceNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not found in loaded packages") ||
+		strings.Contains(msg, "not found in loaded root packages")
 }
 
 var errInterfaceNotInPackage = fmt.Errorf("interface not in package")

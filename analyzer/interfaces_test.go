@@ -152,6 +152,25 @@ func TestGetInterfaceTopology_FindsFullyQualifiedInterfaceNameWithDotsInPackageP
 	}
 }
 
+func TestGetInterfaceTopology_FallbackResolvesDependencyInterfaceWithNarrowPattern(t *testing.T) {
+	dir := createTopologyTestModule(t, "ifacefallback", map[string]string{
+		"api/iface.go": "package api\n\ntype Worker interface {\n\tWork()\n}\n",
+		"impl/impl.go": "package impl\n\nimport \"ifacefallback/api\"\n\ntype Job struct{}\n\nfunc (Job) Work() {}\n\nvar _ api.Worker = Job{}\n",
+		"main/main.go": "package main\n\nfunc main() {}\n",
+	})
+
+	ws := NewWorkspace()
+	// Narrow pattern intentionally excludes api package where interface is declared.
+	result, err := GetInterfaceTopology(ws, dir, "./impl", "ifacefallback/api.Worker", false)
+	if err != nil {
+		t.Fatalf("expected fallback to resolve interface from dependency package, got error: %v", err)
+	}
+	names := implNames(result)
+	if !names["Job"] {
+		t.Fatal("missing Job implementor after fallback lookup")
+	}
+}
+
 func TestGetInterfaceTopology_ReturnsDeterministicSortedImplementors(t *testing.T) {
 	dir := createTopologyTestModule(t, "sorted", map[string]string{
 		"iface.go": "package main\n\ntype Worker interface {\n\tWork()\n}\n",

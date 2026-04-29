@@ -8,6 +8,7 @@ go-arch-xray
 *.exe~
 *.test
 *.out
+integration_realworld_test.go
 
 # Go workspace/vendor artifacts
 vendor/
