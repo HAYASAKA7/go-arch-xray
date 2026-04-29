@@ -375,6 +375,144 @@ func TestHandleCacheStatusAndClearCache(t *testing.T) {
 	}
 }
 
+func TestHandlePackageDependencies_InvalidRootPathReturnsToolError(t *testing.T) {
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handlePackageDependencies(context.Background(), nil, PackageDependenciesInput{
+		RootPath: "/path/to/nonexistent/dir/that/should/not/exist",
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected no structured result, got %#v", result)
+	}
+	if toolResult == nil || !toolResult.IsError {
+		t.Fatalf("expected MCP tool error result for invalid root path, got %#v", toolResult)
+	}
+}
+
+func TestHandlePackageDependencies_MalformedPackagePatternReturnsToolError(t *testing.T) {
+	dir := createMainTestModule(t, "handlerbadpattern", map[string]string{
+		"main.go": "package main\n\nfunc main() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handlePackageDependencies(context.Background(), nil, PackageDependenciesInput{
+		RootPath:       dir,
+		PackagePattern: "invalidquery=foo", // invalid query operator, causes packages.Load to error
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected no structured result, got %#v", result)
+	}
+	if toolResult == nil || !toolResult.IsError {
+		t.Fatalf("expected MCP tool error result for malformed pattern, got %#v", toolResult)
+	}
+}
+
+func TestResolveRootPath_FallbackToWD(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolveRootPath("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resolved != wd {
+		t.Fatalf("expected resolved path %q, got %q", wd, resolved)
+	}
+}
+
+func TestHandleFindCallPath_ReturnsPaths(t *testing.T) {
+	dir := createMainTestModule(t, "handlercallpath", map[string]string{
+		"main.go": "package main\n\nfunc Root() { Worker() }\nfunc Worker() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleFindCallPath(context.Background(), nil, FindCallPathInput{
+		RootPath:     dir,
+		FromFunction: "Root",
+		ToFunction:   "Worker",
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured call path success, got %#v", toolResult)
+	}
+	if result == nil || len(result.Paths) == 0 {
+		t.Fatalf("expected call paths, got %#v", result)
+	}
+}
+
+func TestHandleDetectImportCycles_ReturnsZeroForValidModule(t *testing.T) {
+	dir := createMainTestModule(t, "handlercyclesvalid", map[string]string{
+		"a/a.go": "package a\n\nimport _ \"handlercyclesvalid/b\"\n",
+		"b/b.go": "package b\n\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleDetectImportCycles(context.Background(), nil, DetectImportCyclesInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got %#v", toolResult)
+	}
+	if result == nil || result.CycleCount != 0 {
+		t.Fatalf("expected 0 import cycles for valid module, got %d", result.CycleCount)
+	}
+}
+
+func TestHandleFindReverseDependencies_ReturnsReverseDeps(t *testing.T) {
+	dir := createMainTestModule(t, "handlerrevdeps", map[string]string{
+		"app/app.go":  "package app\n\nimport _ \"handlerrevdeps/domain\"\n",
+		"domain/d.go": "package domain\n\nfunc Name() string { return \"domain\" }\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleFindReverseDependencies(context.Background(), nil, FindReverseDependenciesInput{
+		RootPath:      dir,
+		TargetPackage: "handlerrevdeps/domain",
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got %#v", toolResult)
+	}
+	if result == nil || result.DirectCount == 0 {
+		t.Fatalf("expected reverse dependencies, got %#v", result)
+	}
+}
+
+func TestHandleClearCache_WithPattern(t *testing.T) {
+	dir := createMainTestModule(t, "handlerclearpattern", map[string]string{
+		"main.go": "package main\n\nfunc Root() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("initial load failed: %v", err)
+	}
+
+	_, clearRes, err := handleClearCache(context.Background(), nil, ClearCacheInput{
+		RootPath:       dir,
+		PackagePattern: "./...",
+	})
+	if err != nil {
+		t.Fatalf("clear cache failed: %v", err)
+	}
+	if clearRes == nil || clearRes.Cleared == 0 {
+		t.Fatalf("expected cleared entries, got %#v", clearRes)
+	}
+}
+
 func mainHasDependency(r *analyzer.DependencyResult, from, to string) bool {
 	for _, node := range r.Packages {
 		if node.Package != from {
