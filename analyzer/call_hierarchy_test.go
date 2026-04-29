@@ -3,6 +3,7 @@ package analyzer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -114,6 +115,97 @@ func Y() {}
 	}
 	if !result.Truncated {
 		t.Fatal("expected truncated=true when offset/limit applied")
+	}
+}
+
+func TestAnalyzeCallHierarchy_AcceptsReceiverQualifiedMethodNames(t *testing.T) {
+	dir := createCallHierarchyTestModule(t, "callmethodquery", map[string]string{
+		"main.go": `package main
+
+type orgSyncService struct{}
+
+func (s *orgSyncService) syncUsersWithConflictHandling() {}
+
+func Root() {
+	svc := &orgSyncService{}
+	svc.syncUsersWithConflictHandling()
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	queries := []string{
+		"syncUsersWithConflictHandling",
+		"*orgSyncService.syncUsersWithConflictHandling",
+		"(*orgSyncService).syncUsersWithConflictHandling",
+	}
+
+	for _, q := range queries {
+		if _, err := AnalyzeCallHierarchy(ws, dir, "./...", q, 3); err != nil {
+			t.Fatalf("expected method query %q to resolve, got error: %v", q, err)
+		}
+	}
+}
+
+func TestAnalyzeCallHierarchy_ResolvesDependencyMethodWithNarrowPattern(t *testing.T) {
+	dir := createCallHierarchyTestModule(t, "callmethoddep", map[string]string{
+		"main.go": `package main
+
+import "callmethoddep/services"
+
+func Root() {
+	svc := &services.OrgSyncService{}
+	svc.SyncOrganization()
+}
+`,
+		"services/service.go": `package services
+
+type OrgSyncService struct{}
+
+func (s *OrgSyncService) SyncOrganization() {}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := AnalyzeCallHierarchy(ws, dir, ".", "SyncOrganization", 3)
+	if err != nil {
+		t.Fatalf("expected dependency method lookup to resolve, got error: %v", err)
+	}
+	if shortFuncName(result.RootFunction) != "SyncOrganization" {
+		t.Fatalf("expected root function SyncOrganization, got %s", result.RootFunction)
+	}
+}
+
+func TestAnalyzeCallHierarchy_CaseInsensitiveFallback(t *testing.T) {
+	dir := createCallHierarchyTestModule(t, "callcasefold", map[string]string{
+		"main.go": `package main
+
+type orgSyncService struct{}
+
+func (s *orgSyncService) SyncOrganization() {}
+
+func Root() {
+	svc := &orgSyncService{}
+	svc.SyncOrganization()
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	// "syncOrganization" (lowercase s) should case-insensitively match "SyncOrganization"
+	queries := []string{
+		"syncOrganization",
+		"syncorganization",
+		"SYNCORGANIZATION",
+	}
+	for _, q := range queries {
+		result, err := AnalyzeCallHierarchy(ws, dir, "./...", q, 3)
+		if err != nil {
+			t.Fatalf("expected case-insensitive query %q to resolve, got error: %v", q, err)
+		}
+		if !strings.EqualFold(shortFuncName(result.RootFunction), "SyncOrganization") {
+			t.Fatalf("query %q: expected root SyncOrganization, got %s", q, result.RootFunction)
+		}
 	}
 }
 

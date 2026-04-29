@@ -16,6 +16,23 @@ func TestSplitPatterns_DefaultsAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGetOrLoad_NormalizesFilesystemLikePattern(t *testing.T) {
+	ws := NewWorkspace()
+	dir := createFilesystemPatternModule(t, "pathpattern")
+
+	prog, err := ws.GetOrLoad(dir, "sub/services")
+	if err != nil {
+		t.Fatalf("load with filesystem-like pattern failed: %v", err)
+	}
+
+	if !prog.RootPaths["pathpattern/sub/services"] {
+		t.Fatalf("expected normalized root package path, got %v", prog.RootPaths)
+	}
+	if len(prog.SSAFuncs) == 0 {
+		t.Fatal("expected root SSA functions to be loaded")
+	}
+}
+
 func TestWorkspaceGetOrLoad_MultiplePatternsCacheKeyInvariantToOrder(t *testing.T) {
 	ws := NewWorkspace()
 	dir := createMultiPatternModule(t, "multipat")
@@ -170,5 +187,30 @@ func createMultiPatternModule(t *testing.T, name string) string {
 			t.Fatal(err)
 		}
 	}
+	return dir
+}
+
+func createFilesystemPatternModule(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(filepath.Join(dir, "sub", "services"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sub", "shared"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	files := map[string]string{
+		"go.mod":                  "module " + name + "\n\ngo 1.23\n",
+		"sub/shared/shared.go":    "package shared\n\nfunc Name() string { return \"shared\" }\n",
+		"sub/services/service.go": "package services\n\nimport \"" + name + "/sub/shared\"\n\nfunc Sync() string { return shared.Name() }\n",
+	}
+	for fname, content := range files {
+		path := filepath.Join(dir, fname)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	return dir
 }

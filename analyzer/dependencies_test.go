@@ -132,6 +132,23 @@ func TestGetPackageDependenciesWithOptions_AppliesLimitOffsetAndSummary(t *testi
 	}
 }
 
+func TestGetPackageDependencies_FilesystemLikePatternIncludesImports(t *testing.T) {
+	dir := createDependencyTestModule(t, "depfs", map[string]string{
+		"sub/shared/shared.go": "package shared\n\nfunc Name() string { return \"shared\" }\n",
+		"sub/services/svc.go":  "package services\n\nimport \"depfs/sub/shared\"\n\nfunc Sync() string { return shared.Name() }\n",
+	})
+
+	ws := NewWorkspace()
+	result, err := GetPackageDependencies(ws, dir, "sub/services", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !hasDependency(result, "depfs/sub/services", "depfs/sub/shared") {
+		t.Fatalf("expected depfs/sub/services to import depfs/sub/shared, got %#v", result.Packages)
+	}
+}
+
 func hasPackage(r *DependencyResult, pkg string) bool {
 	for _, node := range r.Packages {
 		if node.Package == pkg {

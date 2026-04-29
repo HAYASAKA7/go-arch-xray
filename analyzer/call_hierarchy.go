@@ -7,9 +7,43 @@ import (
 
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 const defaultCallHierarchyMaxDepth = 3
+
+// isNotFoundError returns true for "function X not found in loaded packages"
+// errors. It returns false for ambiguity errors so the fallback is not
+// triggered when a name genuinely resolves to multiple candidates.
+func isNotFoundError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not found in loaded packages")
+}
+
+// findFunctionWithFallback tries to resolve name in prog and, when not found,
+// loads broader patterns (./... and go.work sub-modules) before giving up.
+func findFunctionWithFallback(ws *Workspace, dir, pattern string, prog *LoadedProgram, name string) (*LoadedProgram, *ssa.Function, error) {
+	fn, err := findFunction(prog, name)
+	if err == nil {
+		return prog, fn, nil
+	}
+	if !isNotFoundError(err) {
+		return nil, nil, err
+	}
+	// Try broader fallback patterns derived from dir (./... + go.work modules)
+	for _, fp := range WorkspaceFallbackPatterns(dir) {
+		if fp == pattern {
+			continue
+		}
+		broadProg, berr := ws.GetOrLoad(dir, fp)
+		if berr != nil {
+			continue
+		}
+		if fn2, ferr := findFunction(broadProg, name); ferr == nil {
+			return broadProg, fn2, nil
+		}
+	}
+	return nil, nil, err
+}
 
 type CallHierarchyResult struct {
 	RootFunction        string                `json:"root_function"`
@@ -57,7 +91,8 @@ func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName s
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
-	root, err := findFunction(prog.SSAFuncs, functionName)
+	var root *ssa.Function
+	prog, root, err = findFunctionWithFallback(ws, dir, pattern, prog, functionName)
 	if err != nil {
 		return nil, err
 	}
@@ -139,23 +174,222 @@ func summarizeCallEdges(edges []CallEdge, enabled bool) *CallHierarchySummary {
 	return s
 }
 
-func findFunction(funcs []*ssa.Function, name string) (*ssa.Function, error) {
-	var matches []*ssa.Function
-	for _, fn := range funcs {
+func findFunction(prog *LoadedProgram, name string) (*ssa.Function, error) {
+	query := strings.TrimSpace(name)
+	if query == "" {
+		return nil, fmt.Errorf("function name is required")
+	}
+
+	matches := matchFunctions(prog.SSAFuncs, query)
+	if len(matches) == 0 {
+		matches = matchAllLoadedFunctions(prog, query)
+	}
+	if len(matches) == 0 {
+		matches = matchFunctionsFold(prog.SSAFuncs, query)
+	}
+	if len(matches) == 0 {
+		matches = matchAllLoadedFunctionsFold(prog, query)
+	}
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("function %s not found in loaded packages", query)
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	rootMatches := make([]*ssa.Function, 0, len(matches))
+	for _, fn := range matches {
+		if fn == nil || fn.Pkg == nil || fn.Pkg.Pkg == nil {
+			continue
+		}
+		if prog.RootPaths[fn.Pkg.Pkg.Path()] {
+			rootMatches = append(rootMatches, fn)
+		}
+	}
+	if len(rootMatches) == 1 {
+		return rootMatches[0], nil
+	}
+	if len(rootMatches) > 1 {
+		matches = rootMatches
+	}
+
+	nonSynthetic := make([]*ssa.Function, 0, len(matches))
+	for _, fn := range matches {
 		if fn == nil {
 			continue
 		}
-		if fn.String() == name || shortFuncName(fn.String()) == name {
-			matches = append(matches, fn)
+		if fn.Synthetic == "" {
+			nonSynthetic = append(nonSynthetic, fn)
 		}
 	}
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("function %s not found in loaded packages", name)
+	if len(nonSynthetic) == 1 {
+		return nonSynthetic[0], nil
 	}
+	if len(nonSynthetic) > 1 {
+		matches = nonSynthetic
+	}
+
 	if len(matches) > 1 {
-		return nil, fmt.Errorf("function %s is ambiguous; use a package-qualified function name", name)
+		candidates := make([]string, 0, len(matches))
+		for _, fn := range matches {
+			if fn != nil {
+				candidates = append(candidates, fn.String())
+			}
+		}
+		return nil, fmt.Errorf("function %s is ambiguous; qualify with package or receiver. Candidates:\n  %s",
+			query, strings.Join(candidates, "\n  "))
 	}
 	return matches[0], nil
+}
+
+func matchFunctions(funcs []*ssa.Function, query string) []*ssa.Function {
+	matches := make([]*ssa.Function, 0, 4)
+	seen := make(map[*ssa.Function]bool, 4)
+	for _, fn := range funcs {
+		if fn == nil || seen[fn] {
+			continue
+		}
+		if matchesFunctionName(fn, query) {
+			matches = append(matches, fn)
+			seen[fn] = true
+		}
+	}
+	return matches
+}
+
+func matchAllLoadedFunctions(prog *LoadedProgram, query string) []*ssa.Function {
+	all := ssautil.AllFunctions(prog.SSA)
+	matches := make([]*ssa.Function, 0, 8)
+	seen := make(map[*ssa.Function]bool, 8)
+	for fn := range all {
+		if fn == nil || seen[fn] {
+			continue
+		}
+		if fn.Pkg == nil || fn.Pkg.Pkg == nil {
+			continue
+		}
+		if !matchesFunctionName(fn, query) {
+			continue
+		}
+		matches = append(matches, fn)
+		seen[fn] = true
+	}
+	return matches
+}
+
+func matchFunctionsFold(funcs []*ssa.Function, query string) []*ssa.Function {
+	matches := make([]*ssa.Function, 0, 4)
+	seen := make(map[*ssa.Function]bool, 4)
+	for _, fn := range funcs {
+		if fn == nil || seen[fn] {
+			continue
+		}
+		if matchesFunctionNameFold(fn, query) {
+			matches = append(matches, fn)
+			seen[fn] = true
+		}
+	}
+	return matches
+}
+
+func matchAllLoadedFunctionsFold(prog *LoadedProgram, query string) []*ssa.Function {
+	all := ssautil.AllFunctions(prog.SSA)
+	matches := make([]*ssa.Function, 0, 8)
+	seen := make(map[*ssa.Function]bool, 8)
+	for fn := range all {
+		if fn == nil || seen[fn] {
+			continue
+		}
+		if fn.Pkg == nil || fn.Pkg.Pkg == nil {
+			continue
+		}
+		if !matchesFunctionNameFold(fn, query) {
+			continue
+		}
+		matches = append(matches, fn)
+		seen[fn] = true
+	}
+	return matches
+}
+
+func matchesFunctionName(fn *ssa.Function, query string) bool {
+	if fn == nil || query == "" {
+		return false
+	}
+
+	if fn.String() == query || shortFuncName(fn.String()) == query || fn.Name() == query {
+		return true
+	}
+
+	if fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+
+	recvType := fn.Signature.Recv().Type().String()
+	recvNoPtr := strings.TrimPrefix(recvType, "*")
+	recvShort := shortTypeName(recvNoPtr)
+	methodName := fn.Name()
+
+	candidates := []string{
+		recvType + "." + methodName,
+		recvNoPtr + "." + methodName,
+		recvShort + "." + methodName,
+		"*" + recvShort + "." + methodName,
+		"(" + recvType + ")." + methodName,
+		"(" + recvNoPtr + ")." + methodName,
+		"(*" + recvShort + ")." + methodName,
+		"(" + recvShort + ")." + methodName,
+	}
+	for _, candidate := range candidates {
+		if candidate == query {
+			return true
+		}
+	}
+
+	if strings.HasSuffix(query, "."+methodName) {
+		qRecv := strings.TrimSuffix(query, "."+methodName)
+		qRecv = strings.Trim(qRecv, "()")
+		qRecv = strings.TrimPrefix(qRecv, "*")
+		qRecvShort := shortTypeName(qRecv)
+		if qRecv == recvNoPtr || qRecvShort == recvShort {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchesFunctionNameFold is the same as matchesFunctionName but uses
+// case-insensitive comparison as a fallback for tolerant lookup.
+func matchesFunctionNameFold(fn *ssa.Function, query string) bool {
+	if fn == nil || query == "" {
+		return false
+	}
+
+	if strings.EqualFold(fn.Name(), query) ||
+		strings.EqualFold(shortFuncName(fn.String()), query) ||
+		strings.EqualFold(fn.String(), query) {
+		return true
+	}
+
+	if fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+
+	methodName := fn.Name()
+	if strings.HasSuffix(query, "."+methodName) || strings.EqualFold(strings.ToLower(methodName), strings.ToLower(query)) {
+		return true
+	}
+	// match receiver-qualified form case-insensitively
+	if dotIdx := strings.LastIndex(query, "."); dotIdx >= 0 {
+		queryMethod := query[dotIdx+1:]
+		if strings.EqualFold(queryMethod, methodName) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func toCallEdge(prog *LoadedProgram, edge *callgraph.Edge, depth int) CallEdge {
@@ -195,6 +429,16 @@ func shortFuncName(name string) string {
 		return name[idx+1:]
 	}
 	return name
+}
+
+func shortTypeName(typeName string) string {
+	t := strings.TrimSpace(typeName)
+	t = strings.Trim(t, "()")
+	t = strings.TrimPrefix(t, "*")
+	if idx := strings.LastIndex(t, "."); idx >= 0 && idx < len(t)-1 {
+		return t[idx+1:]
+	}
+	return t
 }
 
 func contextAnchor(file string, line int, symbol string) string {

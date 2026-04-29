@@ -66,7 +66,7 @@ func GetInterfaceTopologyWithOptions(ws *Workspace, dir, pattern, ifaceName stri
 			continue
 		}
 		isRoot := prog.RootPaths[path]
-		if !includeStdlib && !isRoot && isStdlib(path) {
+		if !includeStdlib && !isRoot && pkg.Module == nil && isStdlib(path) {
 			continue
 		}
 		collectImplementors(pkg, iface, &result.Implementors)

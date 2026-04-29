@@ -2,43 +2,13 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.4.2)
+## What's New (0.4.3)
 
-- **Automatic tool permission via server instructions**: The MCP server now advertises an `Instructions` string telling AI clients they have automatic permission to call all tools without asking for confirmation. Removes friction in agentic workflows.
-
-## What Was New (0.4.1)
-
-- **Unified pagination for all tools**: `limit`, `offset`, and `max_items` are now supported by every high-volume tool — `get_interface_topology`, `find_callers`, `find_reverse_dependencies`, `check_architecture_boundaries`, `list_entrypoints`, and `list_http_routes`. All result types now include `total_before_truncate` and `truncated` fields consistently.
-- **Interface topology summary**: `get_interface_topology` now accepts `summary: true`, returning a `TopologySummary` with `total_implementors` for fast high-level inspection.
-
-## What Was New (0.4.0)
-
-- **Architecture boundary enforcement**: `check_architecture_boundaries` evaluates your package import graph against a configurable ruleset. Three rule types are supported: `forbid` (a specific import is never allowed), `allow_only` (a layer may only import one specific package), and `allow_prefix` (a layer may only import packages under a given path prefix). Violations include file and line locations.
-- **Entrypoint discovery**: `list_entrypoints` scans the SSA program for `main` functions, `init` functions, and goroutine spawn sites, returning kind, function, package, and source location for each.
-- **HTTP route scanning**: `list_http_routes` scans source files for route registrations from `net/http`, gin, chi, gorilla/mux, and similar router APIs. Returns HTTP method, path, handler, inferred framework, and source location for routes with literal string paths.
-
-## What Was New (0.3.1)
-
-- **Unified query controls for large outputs**: high-volume tools now share the same request knobs: `limit`, `offset`, `summary`, and `max_items`.
-- **Consistent truncation metadata**: paged/truncated results consistently report `total_before_truncate` and `truncated`.
-- **Call hierarchy and dependency summaries**: `analyze_call_hierarchy` and `get_package_dependencies` support optional aggregate summaries for faster high-level inspection.
-
-## What Was New (0.3.0)
-
-- **Call path queries**: `find_call_path` performs BFS over the CHA call graph to find all paths from one function to another (`from_function` → `to_function`), with `max_depth` and `max_paths` controls.
-- **Reverse callers**: `find_callers` returns the incoming caller tree for any function, up to `max_depth` hops, with the same edge labels (`Static`, `Interface`, `Goroutine`) as the forward hierarchy tool.
-- **Import cycle detection**: `detect_import_cycles` runs Tarjan SCC over the loaded package import graph and returns every cyclic strongly-connected component.
-- **Reverse dependency lookup**: `find_reverse_dependencies` inverts the import graph to answer "who imports this package?", with optional transitive closure.
-- **Lifecycle output controls**: `trace_struct_lifecycle` now accepts `dedupe_mode` (`none` / `function_field` / `function_kind_field`), `max_hops`, and `summary` to tame large outputs.
-- **Cache observability**: `cache_status` and `clear_cache` expose LRU cache occupancy and allow targeted or full cache invalidation.
-
-## What Was New (0.2.x)
-
-- **Multi-pattern queries**: every tool now accepts `package_patterns: string[]` (or a comma-separated `package_pattern`) so a single request can scan across `./internal/...`, `./pkg/...`, etc. without reloading.
-- **Drastically lower memory**: SSA bodies are built only for the requested (root) packages via `ssautil.Packages` + `ssa.BareInits`; transitive deps stay as type-only entries. CHA call graphs are now cached per loaded program (built lazily on first call-hierarchy request) instead of being rebuilt for every query. After SSA build, the loader also drops `Syntax`, `TypesInfo`, and the bulk of the `go/packages` file lists.
-- **LRU cache eviction**: at most 2 distinct `(root, patterns)` programs are kept live at once; older ones are evicted automatically.
-- **Tighter scans**: lifecycle and concurrency analyzers now iterate only functions in your root packages, not stdlib wrappers — fewer false positives, less work.
-- **Better interface lookup**: fully-qualified interface names (`pkgpath.Name`) are resolved across all loaded packages, including dependencies.
+- **More reliable function resolution in mixed-module workspaces**: `analyze_call_hierarchy`, `find_callers`, and `find_call_path` now retry function lookup with broader fallback patterns when a narrow package pattern does not load the target symbol.
+- **go.work-aware fallback loading**: fallback pattern discovery now reads `go.work` `use` directives so sub-module packages can be analyzed when the workspace root and module roots differ.
+- **Better function name matching**: function lookup now supports receiver-qualified method forms and case-insensitive fallback matching (for example `syncOrganization` to `SyncOrganization`) while preserving explicit ambiguity errors.
+- **Actionable ambiguity errors**: when multiple functions match, the error now includes candidate fully-qualified function names to guide immediate retry with package or receiver qualification.
+- **Pattern and output correctness fixes**: filesystem-like `package_pattern` values are normalized, empty paginated results now serialize as `[]` (not `null`), and stdlib filtering now checks module metadata to avoid misclassifying local imports in dotless module paths.
 
 ## Memory note
 
@@ -158,8 +128,8 @@ If you downloaded a release asset, the extracted binary name includes the target
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.4.2
-git push origin v0.4.2
+git tag v0.4.3
+git push origin v0.4.3
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.

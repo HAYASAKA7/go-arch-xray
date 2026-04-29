@@ -60,7 +60,7 @@ func GetPackageDependenciesWithOptions(ws *Workspace, dir, pattern string, inclu
 			if imp == nil || imp.PkgPath == "" {
 				continue
 			}
-			if !includeStdlib && !rootPaths[imp.PkgPath] && isStdlib(imp.PkgPath) {
+			if !includeStdlib && !rootPaths[imp.PkgPath] && imp.Module == nil && isStdlib(imp.PkgPath) {
 				continue
 			}
 			if seen[imp.PkgPath] {

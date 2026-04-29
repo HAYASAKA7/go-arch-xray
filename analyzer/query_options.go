@@ -29,7 +29,7 @@ func applyQueryWindow[T any](items []T, opts QueryOptions) ([]T, int, bool) {
 	opts = normalizeQueryOptions(opts)
 	total := len(items)
 	if total == 0 {
-		return nil, 0, false
+		return []T{}, 0, false
 	}
 
 	start := opts.Offset

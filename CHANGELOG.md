@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-04-29
+
+### Added
+
+- New workspace parser coverage for `go.work` `use` forms (block and
+  inline syntax) used by fallback pattern expansion.
+- New query-window regression test ensuring empty windows serialize as empty
+  non-nil slices.
+
+### Changed
+
+- Function lookup in call-graph tools now uses staged matching:
+  exact and receiver-qualified matching, then case-insensitive fallback, then
+  ambiguity refinement with candidate listing.
+- `analyze_call_hierarchy`, `find_callers`, and `find_call_path` now share a
+  common function-lookup fallback path that retries broader patterns only for
+  true "not found" cases.
+- Workspace fallback pattern discovery now reads `go.work` module `use`
+  directives and tries additional module patterns (`./submodule/...`) in
+  addition to `./...`.
+- Filesystem-like package patterns are normalized relative to `root_path`
+  before load/cache keying, improving cache hit correctness and package loading
+  consistency.
+
+### Fixed
+
+- Empty paginated output now returns `[]` instead of `null`.
+- Stdlib filtering for dependencies/interface scans now checks module metadata
+  (`Module == nil`) to avoid treating local dotless-module imports as stdlib.
+- `go.work` parsing now correctly skips `use (` block openers and avoids
+  invalid fallback patterns.
+- Server version bumped to `0.4.3`.
+
 ## [0.4.2] - 2026-04-29
 
 ### Changed

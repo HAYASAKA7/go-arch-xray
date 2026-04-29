@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
 )
 
 const defaultCallPathMaxDepth = 8
@@ -49,11 +50,12 @@ func FindCallPath(ws *Workspace, dir, pattern, fromFunction, toFunction string, 
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
-	fromFn, err := findFunction(prog.SSAFuncs, fromFunction)
+	var fromFn, toFn *ssa.Function
+	prog, fromFn, err = findFunctionWithFallback(ws, dir, pattern, prog, fromFunction)
 	if err != nil {
 		return nil, fmt.Errorf("from_function: %w", err)
 	}
-	toFn, err := findFunction(prog.SSAFuncs, toFunction)
+	prog, toFn, err = findFunctionWithFallback(ws, dir, pattern, prog, toFunction)
 	if err != nil {
 		return nil, fmt.Errorf("to_function: %w", err)
 	}

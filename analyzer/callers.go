@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
 )
 
 const defaultCallersMaxDepth = 3
@@ -38,7 +39,8 @@ func FindCallersWithOptions(ws *Workspace, dir, pattern, functionName string, ma
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
-	root, err := findFunction(prog.SSAFuncs, functionName)
+	var root *ssa.Function
+	prog, root, err = findFunctionWithFallback(ws, dir, pattern, prog, functionName)
 	if err != nil {
 		return nil, err
 	}

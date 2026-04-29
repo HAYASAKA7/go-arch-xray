@@ -192,3 +192,39 @@ func createTestModule(t *testing.T, name, code string) string {
 	}
 	return dir
 }
+
+func TestParseGoWorkModuleDirs_BlockSyntax(t *testing.T) {
+	goWorkContent := `go 1.24.2
+
+use (
+	.
+	./sub/netdisk-plugins
+)
+`
+	tmp := filepath.Join(t.TempDir(), "go.work")
+	if err := os.WriteFile(tmp, []byte(goWorkContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patterns := parseGoWorkModuleDirs(tmp)
+	if len(patterns) != 1 {
+		t.Fatalf("expected 1 pattern (root . excluded), got %d: %v", len(patterns), patterns)
+	}
+	if patterns[0] != "./sub/netdisk-plugins/..." {
+		t.Fatalf("expected ./sub/netdisk-plugins/..., got %q", patterns[0])
+	}
+}
+
+func TestParseGoWorkModuleDirs_InlineSyntax(t *testing.T) {
+	goWorkContent := `go 1.23
+use .
+use ./pkg/lib
+`
+	tmp := filepath.Join(t.TempDir(), "go.work")
+	if err := os.WriteFile(tmp, []byte(goWorkContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patterns := parseGoWorkModuleDirs(tmp)
+	if len(patterns) != 1 || patterns[0] != "./pkg/lib/..." {
+		t.Fatalf("expected [./pkg/lib/...], got %v", patterns)
+	}
+}

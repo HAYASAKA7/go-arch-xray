@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -163,7 +164,7 @@ func makeCacheKey(dir string, patterns []string) cacheKey {
 }
 
 func (w *Workspace) GetOrLoad(dir, pattern string) (*LoadedProgram, error) {
-	patterns := SplitPatterns(pattern)
+	patterns := normalizePatternsForDir(dir, SplitPatterns(pattern))
 	key := makeCacheKey(dir, patterns)
 
 	w.mu.Lock()
@@ -211,7 +212,7 @@ func (w *Workspace) evictLocked() {
 }
 
 func (w *Workspace) Invalidate(dir, pattern string) {
-	key := makeCacheKey(dir, SplitPatterns(pattern))
+	key := makeCacheKey(dir, normalizePatternsForDir(dir, SplitPatterns(pattern)))
 	w.mu.Lock()
 	if elem, ok := w.cache[key]; ok {
 		delete(w.cache, key)
@@ -223,7 +224,7 @@ func (w *Workspace) Invalidate(dir, pattern string) {
 // Clear removes a single cached program by key inputs. Returns true when
 // an entry existed and was removed.
 func (w *Workspace) Clear(dir, pattern string) bool {
-	key := makeCacheKey(dir, SplitPatterns(pattern))
+	key := makeCacheKey(dir, normalizePatternsForDir(dir, SplitPatterns(pattern)))
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if elem, ok := w.cache[key]; ok {
@@ -251,6 +252,8 @@ func (w *Workspace) Reload(dir, pattern string) (*LoadedProgram, error) {
 }
 
 func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
+	patterns = normalizePatternsForDir(dir, patterns)
+
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedCompiledGoFiles |
@@ -258,6 +261,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 			packages.NeedTypes |
 			packages.NeedTypesInfo |
 			packages.NeedDeps |
+			packages.NeedModule |
 			packages.NeedImports,
 		Dir:   dir,
 		Tests: false,
@@ -366,6 +370,128 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		RootPaths: rootPaths,
 		Patterns:  patterns,
 	}, nil
+}
+
+func normalizePatternsForDir(dir string, patterns []string) []string {
+	seen := make(map[string]bool, len(patterns))
+	out := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		norm := normalizePatternForDir(dir, pattern)
+		if norm == "" || seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		out = append(out, norm)
+	}
+	if len(out) == 0 {
+		return []string{"./..."}
+	}
+	return out
+}
+
+func normalizePatternForDir(dir, pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return ""
+	}
+
+	unixPattern := strings.ReplaceAll(pattern, "\\", "/")
+	base := unixPattern
+	recursive := false
+	if strings.HasSuffix(unixPattern, "/...") {
+		recursive = true
+		base = strings.TrimSuffix(unixPattern, "/...")
+	}
+
+	absBase := filepath.FromSlash(base)
+	if !filepath.IsAbs(absBase) {
+		absBase = filepath.Join(dir, absBase)
+	}
+	if !pathExists(absBase) {
+		return unixPattern
+	}
+
+	rel, err := filepath.Rel(dir, absBase)
+	if err != nil {
+		return unixPattern
+	}
+
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		if recursive {
+			return "./..."
+		}
+		return "."
+	}
+
+	norm := "./" + rel
+	if recursive {
+		return norm + "/..."
+	}
+	return norm
+}
+
+func pathExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// parseGoWorkModuleDirs reads the go.work file at goWorkPath and returns the
+// relative patterns (./subdir/...) for each `use` directive, excluding "." which
+// maps to "./...". The returned patterns can be passed directly to GetOrLoad.
+func parseGoWorkModuleDirs(goWorkPath string) []string {
+	data, err := os.ReadFile(goWorkPath)
+	if err != nil {
+		return nil
+	}
+	var patterns []string
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Match bare `use ./path` or entries inside a `use ( ... )` block
+		useVal := ""
+		if strings.HasPrefix(line, "use ") {
+			useVal = strings.TrimSpace(strings.TrimPrefix(line, "use "))
+			// strip inline comment
+			if idx := strings.Index(useVal, "//"); idx >= 0 {
+				useVal = strings.TrimSpace(useVal[:idx])
+			}
+			// "use (" opens a block — not a path
+			if useVal == "(" {
+				useVal = ""
+			}
+		} else if !strings.HasPrefix(line, "go ") && !strings.HasPrefix(line, "toolchain ") &&
+			line != "(" && line != ")" && line != "" &&
+			!strings.HasPrefix(line, "//") {
+			// bare path inside a use ( ... ) block
+			useVal = line
+		}
+		if useVal == "" || useVal == "." {
+			continue
+		}
+		// Convert to ./subdir/... pattern
+		rel := strings.TrimPrefix(strings.ReplaceAll(useVal, "\\", "/"), "./")
+		patterns = append(patterns, "./"+rel+"/...")
+	}
+	return patterns
+}
+
+// WorkspaceFallbackPatterns returns additional package patterns to try when
+// a function is not found under the given pattern. It checks for a go.work file
+// at dir and returns ./submod/... patterns for each non-root workspace module.
+func WorkspaceFallbackPatterns(dir string) []string {
+	goWork := filepath.Join(dir, "go.work")
+	if !pathExists(goWork) {
+		return []string{"./..."}
+	}
+	extra := parseGoWorkModuleDirs(goWork)
+	patterns := make([]string, 0, 1+len(extra))
+	patterns = append(patterns, "./...")
+	patterns = append(patterns, extra...)
+	return patterns
 }
 
 // AllLoadedPackages returns the union of root packages and all transitively
