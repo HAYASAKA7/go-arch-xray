@@ -37,6 +37,16 @@ type LoadedProgram struct {
 	RootPaths map[string]bool
 	Patterns  []string
 
+	// importLocs caches per-package import source locations extracted during
+	// load (before pkg.Syntax is cleared). Key: pkg.PkgPath → importPath → loc.
+	// Eliminates the need to re-parse source files in CheckArchitectureBoundaries.
+	importLocs map[string]map[string]importSourceLoc
+
+	// httpRoutes caches all HTTP route registrations extracted during load
+	// (before pkg.Syntax and pkg.CompiledGoFiles are trimmed). Eliminates
+	// full source re-parsing on every ListHTTPRoutes call.
+	httpRoutes []HTTPRoute
+
 	chaOnce  sync.Once
 	chaGraph *callgraph.Graph
 }
@@ -315,6 +325,15 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		}
 	}
 
+	// Capture import source locations and HTTP routes from syntax BEFORE
+	// clearing pkg.Syntax and trimming pkg.CompiledGoFiles. This eliminates
+	// the need to re-parse source files on every analysis call.
+	importLocsCache := make(map[string]map[string]importSourceLoc, len(pkgs))
+	for _, pkg := range pkgs {
+		importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
+	}
+	httpRoutesCache := extractRoutesFromSyntax(pkgs)
+
 	// Drop syntax / type info / file listings from every reachable package
 	// to release the bulk of go/packages memory once SSA is built. The
 	// downstream analyzers only need pkg.Types.Scope(), pkg.PkgPath,
@@ -364,11 +383,13 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v", len(pkgs), len(funcs), dir, patterns)
 
 	return &LoadedProgram{
-		Packages:  pkgs,
-		SSA:       prog,
-		SSAFuncs:  funcs,
-		RootPaths: rootPaths,
-		Patterns:  patterns,
+		Packages:   pkgs,
+		SSA:        prog,
+		SSAFuncs:   funcs,
+		RootPaths:  rootPaths,
+		Patterns:   patterns,
+		importLocs: importLocsCache,
+		httpRoutes: httpRoutesCache,
 	}, nil
 }
 

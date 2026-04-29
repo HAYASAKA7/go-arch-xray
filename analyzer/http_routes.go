@@ -3,10 +3,11 @@ package analyzer
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // HTTPRoute describes a discovered HTTP route registration.
@@ -72,29 +73,14 @@ func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOpt
 		Routes: []HTTPRoute{},
 	}
 
-	for _, pkg := range prog.Packages {
-		// pkg.Syntax is nil after the SSA build memory optimisation; re-parse.
-		fset := token.NewFileSet()
-		for _, filename := range pkg.CompiledGoFiles {
-			f, parseErr := parser.ParseFile(fset, filename, nil, 0)
-			if parseErr != nil {
-				continue
-			}
-			ast.Inspect(f, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				if route := extractHTTPRoute(call, fset); route != nil {
-					result.Routes = append(result.Routes, *route)
-				}
-				return true
-			})
-		}
+	// Use routes cached during load (extracted before pkg.Syntax was cleared).
+	routes := prog.httpRoutes
+	if routes == nil {
+		routes = []HTTPRoute{}
 	}
 
-	sort.Slice(result.Routes, func(i, j int) bool {
-		a, b := result.Routes[i], result.Routes[j]
+	sort.Slice(routes, func(i, j int) bool {
+		a, b := routes[i], routes[j]
 		if a.Path != b.Path {
 			return a.Path < b.Path
 		}
@@ -104,15 +90,40 @@ func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOpt
 		return a.File < b.File
 	})
 
-	result.Total = len(result.Routes)
+	result.Total = len(routes)
 	result.TotalBeforeTruncate = result.Total
 
 	result.Offset = opts.Offset
 	result.Limit = opts.Limit
 	result.MaxItems = opts.MaxItems
-	result.Routes, _, result.Truncated = applyQueryWindow(result.Routes, opts)
+	result.Routes, _, result.Truncated = applyQueryWindow(routes, opts)
 
 	return result, nil
+}
+
+// extractRoutesFromSyntax walks pkg.Syntax for every package to collect HTTP
+// route registrations. Called once during loadProgram before pkg.Syntax is
+// cleared, so no source re-parsing is needed on subsequent ListHTTPRoutes calls.
+func extractRoutesFromSyntax(pkgs []*packages.Package) []HTTPRoute {
+	var routes []HTTPRoute
+	for _, pkg := range pkgs {
+		if pkg.Fset == nil || len(pkg.Syntax) == 0 {
+			continue
+		}
+		for _, file := range pkg.Syntax {
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if route := extractHTTPRoute(call, pkg.Fset); route != nil {
+					routes = append(routes, *route)
+				}
+				return true
+			})
+		}
+	}
+	return routes
 }
 
 // extractHTTPRoute attempts to parse a *ast.CallExpr as a route registration.

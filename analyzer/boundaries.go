@@ -87,7 +87,14 @@ func CheckArchitectureBoundariesWithOptions(ws *Workspace, dir, pattern string, 
 	}
 
 	for _, pkg := range prog.Packages {
-		locs := pkgImportLocs(pkg)
+		var locs map[string]importSourceLoc
+		if prog.importLocs != nil {
+			locs = prog.importLocs[pkg.PkgPath]
+		}
+		if locs == nil {
+			// Fallback for any code path that bypasses the cache.
+			locs = pkgImportLocs(pkg)
+		}
 
 		for _, rule := range rules {
 			if !matchBoundaryPkg(pkg.PkgPath, rule.From) {
@@ -178,6 +185,9 @@ type importSourceLoc struct {
 // After SSA build, loadProgram sets pkg.Syntax to nil to free memory. When
 // that happens we fall back to re-parsing each compiled Go file with
 // parser.ImportsOnly, which is fast because it stops after the import block.
+//
+// In normal operation this slow path is never reached because
+// CheckArchitectureBoundaries uses the importLocs cache on LoadedProgram.
 func pkgImportLocs(pkg *packages.Package) map[string]importSourceLoc {
 	locs := make(map[string]importSourceLoc, len(pkg.Imports))
 	for path := range pkg.Imports {
@@ -212,6 +222,28 @@ func pkgImportLocs(pkg *packages.Package) map[string]importSourceLoc {
 					pos := fset.Position(imp.Pos())
 					locs[path] = importSourceLoc{file: pos.Filename, line: pos.Line}
 				}
+			}
+		}
+	}
+	return locs
+}
+
+// extractImportLocsFromPkg extracts import source locations using pkg.Syntax.
+// This must be called before loadProgram clears pkg.Syntax.
+func extractImportLocsFromPkg(pkg *packages.Package) map[string]importSourceLoc {
+	locs := make(map[string]importSourceLoc, len(pkg.Imports))
+	for path := range pkg.Imports {
+		locs[path] = importSourceLoc{}
+	}
+	if len(pkg.Syntax) == 0 || pkg.Fset == nil {
+		return locs
+	}
+	for _, file := range pkg.Syntax {
+		for _, imp := range file.Imports {
+			path := strings.Trim(imp.Path.Value, `"`)
+			if _, ok := locs[path]; ok {
+				pos := pkg.Fset.Position(imp.Pos())
+				locs[path] = importSourceLoc{file: pos.Filename, line: pos.Line}
 			}
 		}
 	}

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-04-29
+
+### Changed
+
+- `check_architecture_boundaries` now uses import-location metadata cached on
+  `LoadedProgram` (`importLocs`) that is extracted during workspace load.
+  This removes repeated import-block re-parsing in the normal path.
+- `list_http_routes` now uses route metadata cached on `LoadedProgram`
+  (`httpRoutes`) extracted from package syntax during workspace load.
+  This removes repeated source parsing on subsequent route queries.
+- Workspace loader now captures both import locations and HTTP routes before
+  syntax/file-list memory trimming, preserving analysis correctness while
+  keeping memory optimizations.
+- Server version bumped to `0.4.5`.
+
+### Fixed
+
+- Route discovery no longer depends on post-trim `CompiledGoFiles` scanning,
+  which could miss routes declared outside the preserved file subset.
+
 ## [0.4.4] - 2026-04-29
 
 ### Added
