@@ -190,3 +190,37 @@ func TestCheckArchitectureBoundaries_ViolationHasSourceLocation(t *testing.T) {
 		t.Errorf("expected violation to have file/line location, got file=%q line=%d", v.File, v.Line)
 	}
 }
+
+func TestCheckArchitectureBoundariesWithOptions_AppliesLimitOffset(t *testing.T) {
+	dir := createDependencyTestModule(t, "bound_opts", map[string]string{
+		"domain/d.go":      "package domain\n\nfunc Name() string { return \"domain\" }\n",
+		"infra/one/i.go":   "package one\n\nimport \"bound_opts/domain\"\n\nfunc Run() string { return domain.Name() }\n",
+		"infra/two/i.go":   "package two\n\nimport \"bound_opts/domain\"\n\nfunc Run() string { return domain.Name() }\n",
+		"infra/three/i.go": "package three\n\nimport \"bound_opts/domain\"\n\nfunc Run() string { return domain.Name() }\n",
+	})
+
+	ws := NewWorkspace()
+	rules := []BoundaryRule{
+		{Type: RuleForbid, From: "bound_opts/infra/", To: "bound_opts/domain"},
+	}
+	result, err := CheckArchitectureBoundariesWithOptions(ws, dir, "./...", rules, QueryOptions{
+		Limit:  1,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalBeforeTruncate != 3 {
+		t.Fatalf("expected 3 total violations before truncate, got %d", result.TotalBeforeTruncate)
+	}
+	if len(result.Violations) != 1 {
+		t.Fatalf("expected 1 violation due to limit, got %d", len(result.Violations))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated to be true")
+	}
+	if result.Violations[0].From != "bound_opts/infra/three" {
+		t.Fatalf("expected bound_opts/infra/three at offset 1, got %s", result.Violations[0].From)
+	}
+}

@@ -33,6 +33,40 @@ func TestHandlePackageDependencies_ReturnsStructuredDependencies(t *testing.T) {
 	}
 }
 
+func TestHandleInterfaceTopology_ReturnsStructuredTopology(t *testing.T) {
+	dir := createMainTestModule(t, "handlertopo", map[string]string{
+		"iface.go": "package main\n\ntype Worker interface {\n\tWork()\n}\n",
+		"a.go":     "package main\n\ntype A struct{}\nfunc (A) Work() {}\n",
+		"b.go":     "package main\n\ntype B struct{}\nfunc (B) Work() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleInterfaceTopology(context.Background(), nil, InterfaceTopologyInput{
+		RootPath:      dir,
+		InterfaceName: "Worker",
+		Limit:         1,
+		Summary:       true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil {
+		t.Fatal("expected topology result")
+	}
+	if len(result.Implementors) != 1 {
+		t.Fatalf("expected exactly 1 implementor due to limit, got %d", len(result.Implementors))
+	}
+	if result.TotalBeforeTruncate != 2 {
+		t.Fatalf("expected 2 total implementors before truncate, got %d", result.TotalBeforeTruncate)
+	}
+	if result.Summary == nil || result.Summary.TotalImplementors != 2 {
+		t.Fatalf("expected summary with 2 total implementors, got %#v", result.Summary)
+	}
+}
+
 func TestHandleInterfaceTopology_ReturnsToolErrorForInvalidInput(t *testing.T) {
 	dir := createMainTestModule(t, "handlerinvalid", map[string]string{
 		"main.go": "package main\n\nfunc main() {}\n",

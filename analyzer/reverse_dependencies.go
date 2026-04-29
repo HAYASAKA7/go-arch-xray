@@ -18,12 +18,21 @@ type ReverseDependenciesResult struct {
 	TransitiveDependents []string            `json:"transitive_dependents,omitempty"`
 	DirectCount          int                 `json:"direct_count"`
 	TransitiveCount      int                 `json:"transitive_count"`
+	Offset               int                 `json:"offset,omitempty"`
+	Limit                int                 `json:"limit,omitempty"`
+	MaxItems             int                 `json:"max_items,omitempty"`
+	TotalBeforeTruncate  int                 `json:"total_before_truncate"`
+	Truncated            bool                `json:"truncated"`
 }
 
 // FindReverseDependencies returns the set of packages (within the loaded
 // program) that directly import targetPackage. When includeTransitive is true,
 // it also returns the full transitive closure of dependents.
 func FindReverseDependencies(ws *Workspace, dir, pattern, targetPackage string, includeTransitive bool) (*ReverseDependenciesResult, error) {
+	return FindReverseDependenciesWithOptions(ws, dir, pattern, targetPackage, includeTransitive, QueryOptions{})
+}
+
+func FindReverseDependenciesWithOptions(ws *Workspace, dir, pattern, targetPackage string, includeTransitive bool, opts QueryOptions) (*ReverseDependenciesResult, error) {
 	if targetPackage == "" {
 		return nil, fmt.Errorf("target_package is required")
 	}
@@ -47,6 +56,9 @@ func FindReverseDependencies(ws *Workspace, dir, pattern, targetPackage string, 
 
 	result := &ReverseDependenciesResult{
 		TargetPackage: targetPackage,
+		Offset:        opts.Offset,
+		Limit:         opts.Limit,
+		MaxItems:      opts.MaxItems,
 	}
 
 	// Direct dependents
@@ -62,6 +74,11 @@ func FindReverseDependencies(ws *Workspace, dir, pattern, targetPackage string, 
 		return result.DirectDependents[i].Package < result.DirectDependents[j].Package
 	})
 	result.DirectCount = len(result.DirectDependents)
+	result.TotalBeforeTruncate = result.DirectCount
+
+	var directTruncated bool
+	result.DirectDependents, _, directTruncated = applyQueryWindow(result.DirectDependents, opts)
+	result.Truncated = directTruncated
 
 	if !includeTransitive {
 		return result, nil
@@ -96,6 +113,18 @@ func FindReverseDependencies(ws *Workspace, dir, pattern, targetPackage string, 
 	}
 	sort.Strings(result.TransitiveDependents)
 	result.TransitiveCount = len(result.TransitiveDependents)
+	result.TotalBeforeTruncate += result.TransitiveCount
+
+	// For transitive, we just apply the max items/limit constraint to avoid huge payloads,
+	// ignoring offset so that we don't double-skip.
+	maxItems := opts.Limit
+	if maxItems == 0 || (opts.MaxItems > 0 && opts.MaxItems < maxItems) {
+		maxItems = opts.MaxItems
+	}
+	if maxItems > 0 && len(result.TransitiveDependents) > maxItems {
+		result.TransitiveDependents = result.TransitiveDependents[:maxItems]
+		result.Truncated = true
+	}
 
 	return result, nil
 }

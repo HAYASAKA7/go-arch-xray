@@ -111,3 +111,32 @@ func main() { go func() {}() }
 		t.Errorf("Total=%d does not match len(Entrypoints)=%d", result.Total, len(result.Entrypoints))
 	}
 }
+
+func TestListEntrypointsWithOptions_AppliesLimitOffset(t *testing.T) {
+	dir := createTestModule(t, "ep_opts", `package main
+
+func init() {}
+func main() {
+	go func() {}()
+	go func() {}()
+}
+`)
+	ws := NewWorkspace()
+	result, err := ListEntrypointsWithOptions(ws, dir, "./...", QueryOptions{
+		Limit:  1,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalBeforeTruncate != 4 {
+		t.Fatalf("expected 4 total entrypoints before truncate, got %d", result.TotalBeforeTruncate)
+	}
+	if len(result.Entrypoints) != 1 {
+		t.Fatalf("expected 1 entrypoint due to limit, got %d", len(result.Entrypoints))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated to be true")
+	}
+}

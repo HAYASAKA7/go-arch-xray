@@ -181,3 +181,42 @@ func main() {
 		t.Errorf("expected path=/static, got %s", result.Routes[0].Path)
 	}
 }
+
+func TestListHTTPRoutesWithOptions_AppliesLimitOffset(t *testing.T) {
+	dir := createDependencyTestModule(t, "routes_opts", map[string]string{
+		"main.go": `package main
+
+import "net/http"
+
+func h(w http.ResponseWriter, r *http.Request) {}
+
+func main() {
+	http.HandleFunc("/a", h)
+	http.HandleFunc("/b", h)
+	http.HandleFunc("/c", h)
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := ListHTTPRoutesWithOptions(ws, dir, "./...", QueryOptions{
+		Limit:  1,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalBeforeTruncate != 3 {
+		t.Fatalf("expected 3 total routes before truncate, got %d", result.TotalBeforeTruncate)
+	}
+	if len(result.Routes) != 1 {
+		t.Fatalf("expected 1 route due to limit, got %d", len(result.Routes))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated to be true")
+	}
+	if result.Routes[0].Path != "/b" {
+		t.Fatalf("expected route /b at offset 1, got %s", result.Routes[0].Path)
+	}
+}

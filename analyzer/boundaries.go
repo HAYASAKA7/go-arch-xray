@@ -47,14 +47,23 @@ type BoundaryViolation struct {
 
 // BoundaryResult is returned by CheckArchitectureBoundaries.
 type BoundaryResult struct {
-	Violations      []BoundaryViolation `json:"violations"`
-	ViolationCount  int                 `json:"violation_count"`
-	CheckedPackages int                 `json:"checked_packages"`
+	Violations          []BoundaryViolation `json:"violations"`
+	ViolationCount      int                 `json:"violation_count"`
+	CheckedPackages     int                 `json:"checked_packages"`
+	Offset              int                 `json:"offset,omitempty"`
+	Limit               int                 `json:"limit,omitempty"`
+	MaxItems            int                 `json:"max_items,omitempty"`
+	TotalBeforeTruncate int                 `json:"total_before_truncate"`
+	Truncated           bool                `json:"truncated"`
 }
 
 // CheckArchitectureBoundaries evaluates all packages in the loaded workspace
 // against the provided ruleset and returns every import that violates a rule.
 func CheckArchitectureBoundaries(ws *Workspace, dir, pattern string, rules []BoundaryRule) (*BoundaryResult, error) {
+	return CheckArchitectureBoundariesWithOptions(ws, dir, pattern, rules, QueryOptions{})
+}
+
+func CheckArchitectureBoundariesWithOptions(ws *Workspace, dir, pattern string, rules []BoundaryRule, opts QueryOptions) (*BoundaryResult, error) {
 	result := &BoundaryResult{
 		Violations: []BoundaryViolation{},
 	}
@@ -119,6 +128,13 @@ func CheckArchitectureBoundaries(ws *Workspace, dir, pattern string, rules []Bou
 	})
 
 	result.ViolationCount = len(result.Violations)
+	result.TotalBeforeTruncate = result.ViolationCount
+
+	result.Offset = opts.Offset
+	result.Limit = opts.Limit
+	result.MaxItems = opts.MaxItems
+	result.Violations, _, result.Truncated = applyQueryWindow(result.Violations, opts)
+
 	return result, nil
 }
 

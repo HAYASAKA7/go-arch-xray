@@ -2,7 +2,12 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.4.0)
+## What's New (0.4.1)
+
+- **Unified pagination for all tools**: `limit`, `offset`, and `max_items` are now supported by every high-volume tool — `get_interface_topology`, `find_callers`, `find_reverse_dependencies`, `check_architecture_boundaries`, `list_entrypoints`, and `list_http_routes`. All result types now include `total_before_truncate` and `truncated` fields consistently.
+- **Interface topology summary**: `get_interface_topology` now accepts `summary: true`, returning a `TopologySummary` with `total_implementors` for fast high-level inspection.
+
+## What Was New (0.4.0)
 
 - **Architecture boundary enforcement**: `check_architecture_boundaries` evaluates your package import graph against a configurable ruleset. Three rule types are supported: `forbid` (a specific import is never allowed), `allow_only` (a layer may only import one specific package), and `allow_prefix` (a layer may only import packages under a given path prefix). Violations include file and line locations.
 - **Entrypoint discovery**: `list_entrypoints` scans the SSA program for `main` functions, `init` functions, and goroutine spawn sites, returning kind, function, package, and source location for each.
@@ -149,8 +154,8 @@ If you downloaded a release asset, the extracted binary name includes the target
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.3.1
-git push origin v0.3.1
+git tag v0.4.1
+git push origin v0.4.1
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.

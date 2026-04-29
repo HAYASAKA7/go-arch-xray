@@ -28,14 +28,23 @@ type Entrypoint struct {
 
 // EntrypointsResult is returned by ListEntrypoints.
 type EntrypointsResult struct {
-	Entrypoints []Entrypoint `json:"entrypoints"`
-	Total       int          `json:"total"`
+	Entrypoints         []Entrypoint `json:"entrypoints"`
+	Total               int          `json:"total"`
+	Offset              int          `json:"offset,omitempty"`
+	Limit               int          `json:"limit,omitempty"`
+	MaxItems            int          `json:"max_items,omitempty"`
+	TotalBeforeTruncate int          `json:"total_before_truncate"`
+	Truncated           bool         `json:"truncated"`
 }
 
 // ListEntrypoints scans the loaded SSA program for main functions, init
 // functions, and goroutine-spawn sites (go statements), returning each as an
 // Entrypoint with source location.
 func ListEntrypoints(ws *Workspace, dir, pattern string) (*EntrypointsResult, error) {
+	return ListEntrypointsWithOptions(ws, dir, pattern, QueryOptions{})
+}
+
+func ListEntrypointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*EntrypointsResult, error) {
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
@@ -129,6 +138,13 @@ func ListEntrypoints(ws *Workspace, dir, pattern string) (*EntrypointsResult, er
 	})
 
 	result.Total = len(result.Entrypoints)
+	result.TotalBeforeTruncate = result.Total
+
+	result.Offset = opts.Offset
+	result.Limit = opts.Limit
+	result.MaxItems = opts.MaxItems
+	result.Entrypoints, _, result.Truncated = applyQueryWindow(result.Entrypoints, opts)
+
 	return result, nil
 }
 

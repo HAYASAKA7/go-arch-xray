@@ -11,12 +11,21 @@ import (
 const defaultCallersMaxDepth = 3
 
 type CallersResult struct {
-	RootFunction string     `json:"root_function"`
-	MaxDepth     int        `json:"max_depth"`
-	Edges        []CallEdge `json:"edges"`
+	RootFunction        string     `json:"root_function"`
+	MaxDepth            int        `json:"max_depth"`
+	Edges               []CallEdge `json:"edges"`
+	Offset              int        `json:"offset,omitempty"`
+	Limit               int        `json:"limit,omitempty"`
+	MaxItems            int        `json:"max_items,omitempty"`
+	TotalBeforeTruncate int        `json:"total_before_truncate"`
+	Truncated           bool       `json:"truncated"`
 }
 
 func FindCallers(ws *Workspace, dir, pattern, functionName string, maxDepth int) (*CallersResult, error) {
+	return FindCallersWithOptions(ws, dir, pattern, functionName, maxDepth, QueryOptions{})
+}
+
+func FindCallersWithOptions(ws *Workspace, dir, pattern, functionName string, maxDepth int, opts QueryOptions) (*CallersResult, error) {
 	if strings.TrimSpace(functionName) == "" {
 		return nil, fmt.Errorf("function name is required")
 	}
@@ -77,6 +86,11 @@ func FindCallers(ws *Workspace, dir, pattern, functionName string, maxDepth int)
 		}
 		return result.Edges[i].Callee < result.Edges[j].Callee
 	})
+
+	result.Offset = opts.Offset
+	result.Limit = opts.Limit
+	result.MaxItems = opts.MaxItems
+	result.Edges, result.TotalBeforeTruncate, result.Truncated = applyQueryWindow(result.Edges, opts)
 
 	return result, nil
 }

@@ -50,3 +50,36 @@ func B() {}
 		t.Fatal("did not expect Root -> A beyond max depth")
 	}
 }
+
+func TestFindCallersWithOptions_AppliesLimitOffsetAndSummary(t *testing.T) {
+	dir := createCallHierarchyTestModule(t, "callersopts", map[string]string{
+		"main.go": `package main
+
+func Root1() { Target() }
+func Root2() { Target() }
+func Root3() { Target() }
+func Target() {}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := FindCallersWithOptions(ws, dir, "./...", "Target", 3, QueryOptions{
+		Limit:  1,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TotalBeforeTruncate != 3 {
+		t.Fatalf("expected 3 total edges before truncate, got %d", result.TotalBeforeTruncate)
+	}
+	if len(result.Edges) != 1 {
+		t.Fatalf("expected 1 edge due to limit, got %d", len(result.Edges))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated to be true")
+	}
+	if result.Edges[0].Caller != "callersopts.Root2" {
+		t.Fatalf("expected Root2 caller at offset 1, got %s", result.Edges[0].Caller)
+	}
+}

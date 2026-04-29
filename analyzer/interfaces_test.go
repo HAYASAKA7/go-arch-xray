@@ -178,6 +178,43 @@ func TestGetInterfaceTopology_ReturnsDeterministicSortedImplementors(t *testing.
 	}
 }
 
+func TestGetInterfaceTopologyWithOptions_AppliesLimitOffsetAndSummary(t *testing.T) {
+	dir := createTopologyTestModule(t, "ifaceopts", map[string]string{
+		"iface.go": "package main\n\ntype Worker interface {\n\tWork()\n}\n",
+		"a.go":     "package main\n\ntype A struct{}\nfunc (A) Work() {}\n",
+		"b.go":     "package main\n\ntype B struct{}\nfunc (B) Work() {}\n",
+		"c.go":     "package main\n\ntype C struct{}\nfunc (C) Work() {}\n",
+	})
+
+	ws := NewWorkspace()
+
+	// Get offset 1, limit 1 with summary
+	result, err := GetInterfaceTopologyWithOptions(ws, dir, "./...", "Worker", false, QueryOptions{
+		Limit:   1,
+		Offset:  1,
+		Summary: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalBeforeTruncate != 3 {
+		t.Fatalf("expected 3 total implementors, got %d", result.TotalBeforeTruncate)
+	}
+	if result.Summary == nil || result.Summary.TotalImplementors != 3 {
+		t.Fatalf("expected summary with 3 total implementors, got %#v", result.Summary)
+	}
+	if len(result.Implementors) != 1 {
+		t.Fatalf("expected 1 implementor due to limit, got %d", len(result.Implementors))
+	}
+	if result.Implementors[0].Struct != "B" {
+		t.Fatalf("expected implementor B at offset 1, got %s", result.Implementors[0].Struct)
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated to be true")
+	}
+}
+
 func TestGetInterfaceTopology_IncludesFileAndLine(t *testing.T) {
 	dir := createTopologyTestModule(t, "location", map[string]string{
 		"iface.go": "package main\n\ntype Pinger interface {\n\tPing() error\n}\n",

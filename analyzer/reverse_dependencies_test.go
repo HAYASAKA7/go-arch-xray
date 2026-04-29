@@ -85,3 +85,35 @@ func TestFindReverseDependencies_UnknownPackage(t *testing.T) {
 		t.Fatalf("expected 0 direct dependents for unknown package, got %d", result.DirectCount)
 	}
 }
+
+func TestFindReverseDependenciesWithOptions_AppliesLimitOffset(t *testing.T) {
+	dir := createDependencyTestModule(t, "revdeps_opts", map[string]string{
+		"go.mod":       "module revdeps_opts\n\ngo 1.23\n",
+		"core/core.go": "package core\n\nfunc Value() int { return 1 }\n",
+		"a/a.go":       "package a\n\nimport \"revdeps_opts/core\"\n\nfunc Run() int { return core.Value() }\n",
+		"b/b.go":       "package b\n\nimport \"revdeps_opts/core\"\n\nfunc Run() int { return core.Value() }\n",
+		"c/c.go":       "package c\n\nimport \"revdeps_opts/core\"\n\nfunc Run() int { return core.Value() }\n",
+	})
+
+	ws := NewWorkspace()
+	result, err := FindReverseDependenciesWithOptions(ws, dir, "./...", "revdeps_opts/core", false, QueryOptions{
+		Limit:  1,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalBeforeTruncate != 3 {
+		t.Fatalf("expected 3 total direct dependents before truncate, got %d", result.TotalBeforeTruncate)
+	}
+	if len(result.DirectDependents) != 1 {
+		t.Fatalf("expected 1 direct dependent due to limit, got %d", len(result.DirectDependents))
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated to be true")
+	}
+	if result.DirectDependents[0].Package != "revdeps_opts/b" {
+		t.Fatalf("expected revdeps_opts/b dependent at offset 1, got %s", result.DirectDependents[0].Package)
+	}
+}

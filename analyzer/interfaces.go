@@ -17,12 +17,26 @@ type Implementor struct {
 	Anchor  string `json:"context_anchor,omitempty"`
 }
 
+type TopologySummary struct {
+	TotalImplementors int `json:"total_implementors"`
+}
+
 type TopologyResult struct {
-	Interface    string        `json:"interface"`
-	Implementors []Implementor `json:"implementors"`
+	Interface           string           `json:"interface"`
+	Implementors        []Implementor    `json:"implementors"`
+	Offset              int              `json:"offset,omitempty"`
+	Limit               int              `json:"limit,omitempty"`
+	MaxItems            int              `json:"max_items,omitempty"`
+	TotalBeforeTruncate int              `json:"total_before_truncate"`
+	Truncated           bool             `json:"truncated"`
+	Summary             *TopologySummary `json:"summary,omitempty"`
 }
 
 func GetInterfaceTopology(ws *Workspace, dir, pattern, ifaceName string, includeStdlib bool) (*TopologyResult, error) {
+	return GetInterfaceTopologyWithOptions(ws, dir, pattern, ifaceName, includeStdlib, QueryOptions{})
+}
+
+func GetInterfaceTopologyWithOptions(ws *Workspace, dir, pattern, ifaceName string, includeStdlib bool, opts QueryOptions) (*TopologyResult, error) {
 	if strings.TrimSpace(ifaceName) == "" {
 		return nil, fmt.Errorf("interface name is required")
 	}
@@ -41,6 +55,9 @@ func GetInterfaceTopology(ws *Workspace, dir, pattern, ifaceName string, include
 
 	result := &TopologyResult{
 		Interface:    ifaceName,
+		Offset:       opts.Offset,
+		Limit:        opts.Limit,
+		MaxItems:     opts.MaxItems,
 		Implementors: make([]Implementor, 0, 16),
 	}
 
@@ -68,6 +85,13 @@ func GetInterfaceTopology(ws *Workspace, dir, pattern, ifaceName string, include
 		}
 		return a.Line < b.Line
 	})
+
+	result.Implementors, result.TotalBeforeTruncate, result.Truncated = applyQueryWindow(result.Implementors, opts)
+	if opts.Summary {
+		result.Summary = &TopologySummary{
+			TotalImplementors: result.TotalBeforeTruncate,
+		}
+	}
 
 	return result, nil
 }

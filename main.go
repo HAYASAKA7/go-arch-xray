@@ -22,6 +22,10 @@ type InterfaceTopologyInput struct {
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; merged with package_pattern. Defaults to ./..."`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 	IncludeStdlib   bool     `json:"include_stdlib,omitempty" jsonschema:"Include standard library implementations"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
+	Summary         bool     `json:"summary,omitempty" jsonschema:"Include aggregated summary counts"`
 }
 
 type PackageDependenciesInput struct {
@@ -68,6 +72,9 @@ type CallersInput struct {
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 	MaxDepth        int      `json:"max_depth,omitempty" jsonschema:"Maximum caller depth, capped at 8"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum edges to return"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned edges"`
 }
 
 type StructLifecycleInput struct {
@@ -111,6 +118,9 @@ type FindReverseDependenciesInput struct {
 	PackagePatterns   []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to restrict search scope"`
 	RootPath          string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
 	IncludeTransitive bool     `json:"include_transitive,omitempty" jsonschema:"Also return transitive dependents (packages that depend on dependents)"`
+	Offset            int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit             int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems          int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 }
 
 type CacheStatusInput struct{}
@@ -120,18 +130,27 @@ type CheckArchitectureBoundariesInput struct {
 	PackagePattern  string                  `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
 	PackagePatterns []string                `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to restrict evaluation scope; defaults to ./..."`
 	RootPath        string                  `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	Offset          int                     `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit           int                     `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems        int                     `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 }
 
 type ListEntrypointsInput struct {
 	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 }
 
 type ListHTTPRoutesInput struct {
 	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
 	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
 	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 }
 
 type CacheStatusResult struct {
@@ -158,7 +177,7 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.4.0",
+			Version: "0.4.1",
 		},
 		nil,
 	)
@@ -252,7 +271,12 @@ func handleInterfaceTopology(ctx context.Context, req *mcp.CallToolRequest, inpu
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.GetInterfaceTopology(workspace, rootPath, pattern, input.InterfaceName, input.IncludeStdlib)
+	result, err := analyzer.GetInterfaceTopologyWithOptions(workspace, rootPath, pattern, input.InterfaceName, input.IncludeStdlib, analyzer.QueryOptions{
+		Limit:    input.Limit,
+		Offset:   input.Offset,
+		Summary:  input.Summary,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -327,7 +351,11 @@ func handleFindCallers(ctx context.Context, req *mcp.CallToolRequest, input Call
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.FindCallers(workspace, rootPath, pattern, input.FunctionName, input.MaxDepth)
+	result, err := analyzer.FindCallersWithOptions(workspace, rootPath, pattern, input.FunctionName, input.MaxDepth, analyzer.QueryOptions{
+		Offset:   input.Offset,
+		Limit:    input.Limit,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -404,7 +432,11 @@ func handleFindReverseDependencies(ctx context.Context, req *mcp.CallToolRequest
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.FindReverseDependencies(workspace, rootPath, pattern, input.TargetPackage, input.IncludeTransitive)
+	result, err := analyzer.FindReverseDependenciesWithOptions(workspace, rootPath, pattern, input.TargetPackage, input.IncludeTransitive, analyzer.QueryOptions{
+		Offset:   input.Offset,
+		Limit:    input.Limit,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -447,7 +479,11 @@ func handleCheckArchitectureBoundaries(ctx context.Context, req *mcp.CallToolReq
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.CheckArchitectureBoundaries(workspace, rootPath, pattern, input.Rules)
+	result, err := analyzer.CheckArchitectureBoundariesWithOptions(workspace, rootPath, pattern, input.Rules, analyzer.QueryOptions{
+		Offset:   input.Offset,
+		Limit:    input.Limit,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -461,7 +497,11 @@ func handleListEntrypoints(ctx context.Context, req *mcp.CallToolRequest, input 
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.ListEntrypoints(workspace, rootPath, pattern)
+	result, err := analyzer.ListEntrypointsWithOptions(workspace, rootPath, pattern, analyzer.QueryOptions{
+		Offset:   input.Offset,
+		Limit:    input.Limit,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -475,7 +515,11 @@ func handleListHTTPRoutes(ctx context.Context, req *mcp.CallToolRequest, input L
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
-	result, err := analyzer.ListHTTPRoutes(workspace, rootPath, pattern)
+	result, err := analyzer.ListHTTPRoutesWithOptions(workspace, rootPath, pattern, analyzer.QueryOptions{
+		Offset:   input.Offset,
+		Limit:    input.Limit,
+		MaxItems: input.MaxItems,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}

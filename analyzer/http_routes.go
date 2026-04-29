@@ -22,8 +22,13 @@ type HTTPRoute struct {
 
 // HTTPRoutesResult is returned by ListHTTPRoutes.
 type HTTPRoutesResult struct {
-	Routes []HTTPRoute `json:"routes"`
-	Total  int         `json:"total"`
+	Routes              []HTTPRoute `json:"routes"`
+	Total               int         `json:"total"`
+	Offset              int         `json:"offset,omitempty"`
+	Limit               int         `json:"limit,omitempty"`
+	MaxItems            int         `json:"max_items,omitempty"`
+	TotalBeforeTruncate int         `json:"total_before_truncate"`
+	Truncated           bool        `json:"truncated"`
 }
 
 // routeMethod maps known router method names to HTTP method strings.
@@ -54,6 +59,10 @@ var routeMethod = map[string]string{
 // net/http, gin, chi, echo, gorilla/mux, and fibre-style router APIs.
 // Route paths must be string literals; dynamic paths are skipped.
 func ListHTTPRoutes(ws *Workspace, dir, pattern string) (*HTTPRoutesResult, error) {
+	return ListHTTPRoutesWithOptions(ws, dir, pattern, QueryOptions{})
+}
+
+func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*HTTPRoutesResult, error) {
 	prog, err := ws.GetOrLoad(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
@@ -96,6 +105,13 @@ func ListHTTPRoutes(ws *Workspace, dir, pattern string) (*HTTPRoutesResult, erro
 	})
 
 	result.Total = len(result.Routes)
+	result.TotalBeforeTruncate = result.Total
+
+	result.Offset = opts.Offset
+	result.Limit = opts.Limit
+	result.MaxItems = opts.MaxItems
+	result.Routes, _, result.Truncated = applyQueryWindow(result.Routes, opts)
+
 	return result, nil
 }
 

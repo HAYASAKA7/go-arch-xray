@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-29
+
+### Added
+
+- Unified pagination and output controls (`limit`, `offset`, `max_items`) are now
+  supported by all remaining high-volume tools:
+  - `get_interface_topology` — also gains `summary` support, returning
+    `TopologySummary` with `total_implementors`.
+  - `find_callers`
+  - `find_reverse_dependencies`
+  - `check_architecture_boundaries`
+  - `list_entrypoints`
+  - `list_http_routes`
+- All result types for the above tools now include consistent truncation
+  metadata fields: `total_before_truncate` and `truncated`.
+- `WithOptions` variants added for every analyzer function (`CheckArchitectureBoundariesWithOptions`,
+  `FindCallersWithOptions`, `FindReverseDependenciesWithOptions`,
+  `GetInterfaceTopologyWithOptions`, `ListEntrypointsWithOptions`,
+  `ListHTTPRoutesWithOptions`). Original signatures are preserved and delegate
+  to the new variants with empty `QueryOptions{}`.
+
+### Changed
+
+- Server version bumped to `0.4.1`.
+
 ## [0.4.0] - 2026-04-28
 
 ### Added
