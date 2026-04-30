@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-04-30
+
+### Changed
+
+- Server `Instructions` rewritten to fix two recurring AI-client
+  failure modes:
+  - **Premature fallback on tool error.** AI clients sometimes treat
+    the first MCP error as terminal and silently switch to generic
+    file/text search. The new error-handling policy requires at least
+    one corrective retry of the SAME tool (with diagnostic guidance
+    for `package not found`, `no packages loaded`, `stream cursor
+    invalidated`, and transient build errors) before any fallback,
+    and forces the client to state which tool failed if it does fall
+    back.
+  - **First-page-only pagination.** AI clients sometimes stop after
+    one streamed chunk even when `has_more=true`, silently truncating
+    answers to questions like "list ALL routes" or "find every dead
+    function". The new pagination policy makes iterating until
+    `has_more=false` mandatory for completeness-sensitive questions,
+    and requires explicitly disclosing remaining items (via
+    `total_before_truncate`) when stopping early.
+- Updated MCP-first tool list in instructions to include
+  `find_dead_code` and `find_duplicate_methods` (added in 0.5.4).
+
+### Removed
+
+- `include_tests` option on `find_dead_code` and `find_duplicate_methods`.
+  The workspace loader does not load `*_test.go` files into the
+  analysis program, so the flag was a no-op. Both tools now state
+  this limitation in their `notes` field.
+
 ## [0.5.4] - 2026-04-30
 
 ### Added
@@ -15,11 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confidence tiers: `unreferenced` (no callers at all) and
   `unreachable_from_entrypoint` (callers exist but the chain is dead).
   `include_exported: true` opts into auditing exported symbols (useful
-  for internal-only modules); `include_tests: true` includes `*_test.go`
-  files. Each result carries `notes` listing CHA's blind spots
-  (reflection, plugins, cgo, `//go:linkname`) so AI clients can warn
-  before deletion. Streaming/pagination via the standard `chunk_size` +
-  `cursor` pattern.
+  for internal-only modules). Each result carries `notes` listing
+  CHA's blind spots (reflection, plugins, cgo, `//go:linkname`) so
+  AI clients can warn before deletion. Streaming/pagination via the
+  standard `chunk_size` + `cursor` pattern.
 - New `find_duplicate_methods` MCP tool: groups functions and methods
   whose signature matches and whose normalized body hashes match across
   the workspace. Bodies are pretty-printed and whitespace-collapsed
