@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cyanl/go-arch-xray/analyzer"
+	"github.com/HAYASAKA7/go-arch-xray/analyzer"
 )
 
 func TestHandlePackageDependencies_ReturnsStructuredDependencies(t *testing.T) {

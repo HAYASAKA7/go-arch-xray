@@ -54,6 +54,27 @@ On macOS/Linux, make the binary executable if needed:
 chmod +x ./go-arch-xray-*
 ```
 
+## Install From npm
+
+A thin Node launcher is published as [`@hayasaka7/go-arch-xray`](https://www.npmjs.com/package/@hayasaka7/go-arch-xray).
+On install, a `postinstall` script downloads the matching binary from the
+corresponding GitHub Release. Use it directly with `npx`:
+
+```bash
+npx -y @hayasaka7/go-arch-xray
+```
+
+Or install globally:
+
+```bash
+npm install -g @hayasaka7/go-arch-xray
+go-arch-xray
+```
+
+Set `GO_ARCH_XRAY_BIN=/absolute/path/to/binary` to skip the download and
+point the launcher at a pre-installed binary (useful for air-gapped
+environments).
+
 ## Build From Source
 
 ```powershell
@@ -129,13 +150,26 @@ If you downloaded a release asset, the extracted binary name includes the target
 }
 ```
 
+If you installed via npm, use `npx` so MCP hosts don't need an absolute path:
+
+```json
+{
+  "mcpServers": {
+    "go-arch-xray": {
+      "command": "npx",
+      "args": ["-y", "@hayasaka7/go-arch-xray"]
+    }
+  }
+}
+```
+
 ## Release Workflow
 
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.4.6
-git push origin v0.4.6
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.

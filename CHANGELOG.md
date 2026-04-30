@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-30
+
+### Added
+
+- npm distribution under `@hayasaka7/go-arch-xray`. The package ships a
+  small Node launcher and a `postinstall` script that downloads the
+  matching native binary (Windows / macOS / Linux × x64 / arm64) from
+  the corresponding GitHub Release. MCP hosts can now configure the
+  server with `npx -y @hayasaka7/go-arch-xray` instead of managing a
+  local binary path.
+- `GO_ARCH_XRAY_BIN` environment variable lets users point the launcher
+  at a pre-installed binary, skipping the download (useful for
+  air-gapped environments and corporate package mirrors).
+- GitHub Actions release workflow now publishes the npm package with
+  npm provenance after the GitHub Release assets are uploaded.
+
+### Changed
+
+- Go module path renamed to `github.com/HAYASAKA7/go-arch-xray` to match
+  the canonical repository owner.
+- Server version bumped to `0.5.0`.
+
 ## [0.4.9] - 2026-04-30
 
 ### Changed

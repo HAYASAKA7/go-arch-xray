@@ -25,3 +25,12 @@ coverage.out
 Thumbs.db
 *.swp
 *.swo
+
+# npm package artifacts
+node_modules/
+npm/node_modules/
+npm/bin/go-arch-xray
+npm/bin/go-arch-xray.exe
+npm-debug.log*
+*.tgz
+.npmrc

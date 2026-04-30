@@ -1,4 +1,4 @@
-module github.com/cyanl/go-arch-xray
+module github.com/HAYASAKA7/go-arch-xray
 
 go 1.25.4
 

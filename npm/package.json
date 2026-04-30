@@ -1,0 +1,49 @@
+{
+  "name": "@hayasaka7/go-arch-xray",
+  "version": "0.5.0",
+  "description": "Model Context Protocol server for static analysis of Go codebases (call graphs, import graphs, interface topology, struct lifecycle, HTTP routes).",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "golang",
+    "go",
+    "static-analysis",
+    "call-graph",
+    "ssa",
+    "architecture"
+  ],
+  "homepage": "https://github.com/HAYASAKA7/go-arch-xray#readme",
+  "bugs": {
+    "url": "https://github.com/HAYASAKA7/go-arch-xray/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HAYASAKA7/go-arch-xray.git"
+  },
+  "license": "MIT",
+  "author": "HAYASAKA7",
+  "bin": {
+    "go-arch-xray": "bin/go-arch-xray.js"
+  },
+  "files": [
+    "install.js",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cyanl/go-arch-xray/analyzer"
+	"github.com/HAYASAKA7/go-arch-xray/analyzer"
 )
 
 // BenchmarkHandlePackageDependencies measures latency for the dependency analysis tool
