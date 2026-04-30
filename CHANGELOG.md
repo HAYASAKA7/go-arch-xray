@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-04-30
+
+### Changed
+
+- MCP server `Instructions` now include an explicit output-size policy that
+  steers AI clients to prefer cursor-based streaming (`chunk_size` +
+  `cursor`) over large `max_items`/`limit` values for slice-returning
+  tools, with explicit recovery rules for `truncated:true` responses and
+  `stream cursor invalidated` errors.
+- Server version bumped to `0.4.9`.
+
+## [0.4.8] - 2026-04-30
+
+### Added
+
+- Cursor-based streaming extended to every slice-returning analysis tool:
+  `get_interface_topology`, `get_package_dependencies`, `find_callers`,
+  `find_reverse_dependencies`, `check_architecture_boundaries`,
+  `list_entrypoints`, and `list_http_routes` now accept `chunk_size` +
+  `cursor` and emit `chunk_size`, `next_cursor`, and `has_more` in the
+  response. Same fingerprint-based invalidation semantics as the streaming
+  introduced for `analyze_call_hierarchy` and `trace_struct_lifecycle` in
+  `0.4.7`.
+- Internal `streamOrWindow` helper unifies streaming and pagination across
+  all slice-returning tools so behavior stays consistent.
+- Server version bumped to `0.4.8`.
+
+## [0.4.7] - 2026-04-30
+
+### Added
+
+- Cursor-based streaming for `analyze_call_hierarchy` and
+  `trace_struct_lifecycle` via new `chunk_size` and `cursor` parameters.
+  When `chunk_size > 0`, results are returned in fixed-size chunks together
+  with an opaque `next_cursor` token; passing the token back as `cursor`
+  resumes the stream. The cursor binds to a fingerprint of the underlying
+  dataset so mid-stream changes (e.g. a workspace reload) are detected and
+  surfaced as an error rather than silently producing inconsistent output.
+- Streaming is fully backward compatible: when `chunk_size` is omitted,
+  behavior and response shape are unchanged.
+- Server version bumped to `0.4.7`.
+
 ## [0.4.6] - 2026-04-30
 
 ### Changed

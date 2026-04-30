@@ -27,6 +27,9 @@ type TopologyResult struct {
 	Offset              int              `json:"offset,omitempty"`
 	Limit               int              `json:"limit,omitempty"`
 	MaxItems            int              `json:"max_items,omitempty"`
+	ChunkSize           int              `json:"chunk_size,omitempty"`
+	NextCursor          string           `json:"next_cursor,omitempty"`
+	HasMore             bool             `json:"has_more,omitempty"`
 	TotalBeforeTruncate int              `json:"total_before_truncate"`
 	Truncated           bool             `json:"truncated"`
 	Summary             *TopologySummary `json:"summary,omitempty"`
@@ -105,7 +108,13 @@ func GetInterfaceTopologyWithOptions(ws *Workspace, dir, pattern, ifaceName stri
 		return a.Line < b.Line
 	})
 
-	result.Implementors, result.TotalBeforeTruncate, result.Truncated = applyQueryWindow(result.Implementors, opts)
+	result.Implementors, result.TotalBeforeTruncate, result.Truncated, result.HasMore, result.NextCursor, err = streamOrWindow(result.Implementors, "interface_topology:"+ifaceName, implementorKey, opts)
+	if err != nil {
+		return nil, err
+	}
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+	}
 	if opts.Summary {
 		result.Summary = &TopologySummary{
 			TotalImplementors: result.TotalBeforeTruncate,
@@ -113,6 +122,10 @@ func GetInterfaceTopologyWithOptions(ws *Workspace, dir, pattern, ifaceName stri
 	}
 
 	return result, nil
+}
+
+func implementorKey(i Implementor) string {
+	return i.Package + "|" + i.Struct + "|" + i.File + ":" + fmt.Sprintf("%d", i.Line)
 }
 
 func findInterface(loaded map[string]*packages.Package, roots []*packages.Package, name string) (*types.Interface, error) {

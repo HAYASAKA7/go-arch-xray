@@ -13,6 +13,9 @@ type StructLifecycleResult struct {
 	Struct              string            `json:"struct"`
 	DedupeMode          string            `json:"dedupe_mode,omitempty"`
 	MaxHops             int               `json:"max_hops"`
+	ChunkSize           int               `json:"chunk_size,omitempty"`
+	NextCursor          string            `json:"next_cursor,omitempty"`
+	HasMore             bool              `json:"has_more,omitempty"`
 	TotalBeforeTruncate int               `json:"total_before_truncate,omitempty"`
 	Truncated           bool              `json:"truncated,omitempty"`
 	Summary             *LifecycleSummary `json:"summary,omitempty"`
@@ -32,6 +35,8 @@ type LifecycleOptions struct {
 	Limit      int
 	Offset     int
 	MaxItems   int
+	Cursor     string
+	ChunkSize  int
 }
 
 type LifecycleHop struct {
@@ -110,11 +115,36 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string, opts L
 		result.Truncated = true
 	}
 
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+		firstKey, lastKey := lifecycleHopBoundaryKeys(result.Hops)
+		chunk, _, nextCursor, hasMore, serr := applyStreamWindow(result.Hops, "lifecycle:"+result.Struct+"|"+result.DedupeMode, firstKey, lastKey, StreamOptions{Cursor: opts.Cursor, ChunkSize: opts.ChunkSize})
+		if serr != nil {
+			return nil, serr
+		}
+		result.Truncated = result.Truncated || hasMore || (opts.Cursor != "")
+		result.Hops = chunk
+		result.NextCursor = nextCursor
+		result.HasMore = hasMore
+		return result, nil
+	}
+
 	window, _, truncated := applyQueryWindow(result.Hops, QueryOptions{Limit: opts.Limit, Offset: opts.Offset, MaxItems: opts.MaxItems, Summary: opts.Summary})
 	result.Truncated = result.Truncated || truncated
 	result.Hops = window
 
 	return result, nil
+}
+
+func lifecycleHopBoundaryKeys(hops []LifecycleHop) (firstKey, lastKey string) {
+	if len(hops) == 0 {
+		return "", ""
+	}
+	return lifecycleHopKey(hops[0]), lifecycleHopKey(hops[len(hops)-1])
+}
+
+func lifecycleHopKey(h LifecycleHop) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%s:%d", h.Kind, h.Function, h.Field, h.Struct, h.File, h.Line)
 }
 
 func normalizeLifecycleOptions(opts LifecycleOptions) LifecycleOptions {
@@ -135,7 +165,11 @@ func normalizeLifecycleOptions(opts LifecycleOptions) LifecycleOptions {
 		maxHops = 20000
 	}
 	qo := normalizeQueryOptions(QueryOptions{Limit: opts.Limit, Offset: opts.Offset, MaxItems: opts.MaxItems, Summary: opts.Summary})
-	return LifecycleOptions{DedupeMode: mode, MaxHops: maxHops, Summary: opts.Summary, Limit: qo.Limit, Offset: qo.Offset, MaxItems: qo.MaxItems}
+	chunk := opts.ChunkSize
+	if chunk < 0 {
+		chunk = 0
+	}
+	return LifecycleOptions{DedupeMode: mode, MaxHops: maxHops, Summary: opts.Summary, Limit: qo.Limit, Offset: qo.Offset, MaxItems: qo.MaxItems, Cursor: opts.Cursor, ChunkSize: chunk}
 }
 
 func dedupeLifecycleHops(hops []LifecycleHop, mode string) []LifecycleHop {

@@ -33,6 +33,9 @@ type EntrypointsResult struct {
 	Offset              int          `json:"offset,omitempty"`
 	Limit               int          `json:"limit,omitempty"`
 	MaxItems            int          `json:"max_items,omitempty"`
+	ChunkSize           int          `json:"chunk_size,omitempty"`
+	NextCursor          string       `json:"next_cursor,omitempty"`
+	HasMore             bool         `json:"has_more,omitempty"`
 	TotalBeforeTruncate int          `json:"total_before_truncate"`
 	Truncated           bool         `json:"truncated"`
 }
@@ -143,9 +146,20 @@ func ListEntrypointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOp
 	result.Offset = opts.Offset
 	result.Limit = opts.Limit
 	result.MaxItems = opts.MaxItems
-	result.Entrypoints, _, result.Truncated = applyQueryWindow(result.Entrypoints, opts)
+	var err2 error
+	result.Entrypoints, _, result.Truncated, result.HasMore, result.NextCursor, err2 = streamOrWindow(result.Entrypoints, "entrypoints:"+dir+"|"+pattern, entrypointKey, opts)
+	if err2 != nil {
+		return nil, err2
+	}
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+	}
 
 	return result, nil
+}
+
+func entrypointKey(e Entrypoint) string {
+	return string(e.Kind) + "|" + e.Package + "|" + e.Function + "|" + e.File + ":" + fmt.Sprintf("%d", e.Line)
 }
 
 func ssaFuncPos(fn *ssa.Function) (string, int) {

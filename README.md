@@ -2,12 +2,6 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.4.6)
-
-- **MCP-first instruction policy**: server guidance now explicitly prioritizes MCP analysis tools over generic text/file search when understanding repository structure and relationships.
-- **Refactor pre-check/post-verify policy**: server guidance now explicitly requires MCP-based impact pre-check before refactors and MCP-based post-verification after refactors.
-- **Tool descriptions aligned with policy**: key topology tools are now labeled as primary MCP-first tools to improve agent tool-selection behavior.
-
 ## Memory note
 
 If you still observe high RSS on very large monorepos, narrow your `package_patterns` to the modules you actually want to inspect rather than `./...`.

@@ -19,6 +19,9 @@ type DependencyResult struct {
 	Offset              int                 `json:"offset,omitempty"`
 	Limit               int                 `json:"limit,omitempty"`
 	MaxItems            int                 `json:"max_items,omitempty"`
+	ChunkSize           int                 `json:"chunk_size,omitempty"`
+	NextCursor          string              `json:"next_cursor,omitempty"`
+	HasMore             bool                `json:"has_more,omitempty"`
 	TotalBeforeTruncate int                 `json:"total_before_truncate,omitempty"`
 	Truncated           bool                `json:"truncated,omitempty"`
 	Summary             *DependencySummary  `json:"summary,omitempty"`
@@ -86,12 +89,24 @@ func GetPackageDependenciesWithOptions(ws *Workspace, dir, pattern string, inclu
 	})
 
 	result.Summary = summarizeDependencies(result.Packages, opts.Summary)
-	window, total, truncated := applyQueryWindow(result.Packages, opts)
+	window, total, truncated, hasMore, nextCursor, serr := streamOrWindow(result.Packages, "package_dependencies:"+dir+"|"+pattern, packageDependencyKey, opts)
+	if serr != nil {
+		return nil, serr
+	}
 	result.TotalBeforeTruncate = total
 	result.Truncated = truncated
 	result.Packages = window
+	result.HasMore = hasMore
+	result.NextCursor = nextCursor
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+	}
 
 	return result, nil
+}
+
+func packageDependencyKey(p PackageDependency) string {
+	return p.Package
 }
 
 func summarizeDependencies(packages []PackageDependency, enabled bool) *DependencySummary {

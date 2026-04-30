@@ -2,11 +2,19 @@ package analyzer
 
 // QueryOptions provides consistent high-volume output controls across tools.
 // Zero values are backward-compatible (no pagination/truncation).
+//
+// Streaming: when ChunkSize > 0, results are emitted in fixed-size chunks
+// with an opaque continuation Cursor. Streaming overrides Limit and Offset
+// and is intended for tools that may produce very large outputs (e.g.
+// call hierarchies and lifecycle traces). MaxItems still applies as a
+// global safety cap on the addressable dataset before chunking.
 type QueryOptions struct {
-	Limit    int
-	Offset   int
-	MaxItems int
-	Summary  bool
+	Limit     int
+	Offset    int
+	MaxItems  int
+	Summary   bool
+	Cursor    string
+	ChunkSize int
 }
 
 func normalizeQueryOptions(opts QueryOptions) QueryOptions {

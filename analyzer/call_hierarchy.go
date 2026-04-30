@@ -51,6 +51,9 @@ type CallHierarchyResult struct {
 	Offset              int                   `json:"offset,omitempty"`
 	Limit               int                   `json:"limit,omitempty"`
 	MaxItems            int                   `json:"max_items,omitempty"`
+	ChunkSize           int                   `json:"chunk_size,omitempty"`
+	NextCursor          string                `json:"next_cursor,omitempty"`
+	HasMore             bool                  `json:"has_more,omitempty"`
 	TotalBeforeTruncate int                   `json:"total_before_truncate,omitempty"`
 	Truncated           bool                  `json:"truncated,omitempty"`
 	Summary             *CallHierarchySummary `json:"summary,omitempty"`
@@ -148,12 +151,45 @@ func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName s
 	})
 
 	result.Summary = summarizeCallEdges(result.Edges, opts.Summary)
+
+	// Apply MaxItems first as a global cap on the addressable dataset, so
+	// streaming and pagination operate over the same bounded slice.
+	if opts.MaxItems > 0 && len(result.Edges) > opts.MaxItems {
+		result.Edges = result.Edges[:opts.MaxItems]
+	}
+
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+		firstKey, lastKey := callEdgeBoundaryKeys(result.Edges)
+		chunk, total, nextCursor, hasMore, serr := applyStreamWindow(result.Edges, "call_hierarchy:"+result.RootFunction, firstKey, lastKey, StreamOptions{Cursor: opts.Cursor, ChunkSize: opts.ChunkSize})
+		if serr != nil {
+			return nil, serr
+		}
+		result.TotalBeforeTruncate = total
+		result.Truncated = hasMore || (opts.Cursor != "")
+		result.Edges = chunk
+		result.NextCursor = nextCursor
+		result.HasMore = hasMore
+		return result, nil
+	}
+
 	window, total, truncated := applyQueryWindow(result.Edges, opts)
 	result.TotalBeforeTruncate = total
 	result.Truncated = truncated
 	result.Edges = window
 
 	return result, nil
+}
+
+func callEdgeBoundaryKeys(edges []CallEdge) (firstKey, lastKey string) {
+	if len(edges) == 0 {
+		return "", ""
+	}
+	return callEdgeKey(edges[0]), callEdgeKey(edges[len(edges)-1])
+}
+
+func callEdgeKey(e CallEdge) string {
+	return fmt.Sprintf("%d|%s->%s|%s|%s:%d", e.Depth, e.Caller, e.Callee, e.CallType, e.File, e.Line)
 }
 
 func summarizeCallEdges(edges []CallEdge, enabled bool) *CallHierarchySummary {

@@ -28,6 +28,9 @@ type HTTPRoutesResult struct {
 	Offset              int         `json:"offset,omitempty"`
 	Limit               int         `json:"limit,omitempty"`
 	MaxItems            int         `json:"max_items,omitempty"`
+	ChunkSize           int         `json:"chunk_size,omitempty"`
+	NextCursor          string      `json:"next_cursor,omitempty"`
+	HasMore             bool        `json:"has_more,omitempty"`
 	TotalBeforeTruncate int         `json:"total_before_truncate"`
 	Truncated           bool        `json:"truncated"`
 }
@@ -93,12 +96,43 @@ func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOpt
 	result.Total = len(routes)
 	result.TotalBeforeTruncate = result.Total
 
+	// Apply MaxItems first as a global safety cap on the addressable dataset
+	// so streaming and pagination operate over the same bounded slice.
+	if opts.MaxItems > 0 && len(routes) > opts.MaxItems {
+		routes = routes[:opts.MaxItems]
+	}
+
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+		firstKey, lastKey := httpRouteBoundaryKeys(routes)
+		chunk, _, nextCursor, hasMore, serr := applyStreamWindow(routes, "http_routes:"+dir+"|"+pattern, firstKey, lastKey, StreamOptions{Cursor: opts.Cursor, ChunkSize: opts.ChunkSize})
+		if serr != nil {
+			return nil, serr
+		}
+		result.Routes = chunk
+		result.NextCursor = nextCursor
+		result.HasMore = hasMore
+		result.Truncated = hasMore || (opts.Cursor != "")
+		return result, nil
+	}
+
 	result.Offset = opts.Offset
 	result.Limit = opts.Limit
 	result.MaxItems = opts.MaxItems
 	result.Routes, _, result.Truncated = applyQueryWindow(routes, opts)
 
 	return result, nil
+}
+
+func httpRouteBoundaryKeys(routes []HTTPRoute) (firstKey, lastKey string) {
+	if len(routes) == 0 {
+		return "", ""
+	}
+	return httpRouteKey(routes[0]), httpRouteKey(routes[len(routes)-1])
+}
+
+func httpRouteKey(r HTTPRoute) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%s:%d", r.Method, r.Path, r.Framework, r.Handler, r.File, r.Line)
 }
 
 // extractRoutesFromSyntax walks pkg.Syntax for every package to collect HTTP

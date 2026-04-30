@@ -21,6 +21,9 @@ type ReverseDependenciesResult struct {
 	Offset               int                 `json:"offset,omitempty"`
 	Limit                int                 `json:"limit,omitempty"`
 	MaxItems             int                 `json:"max_items,omitempty"`
+	ChunkSize            int                 `json:"chunk_size,omitempty"`
+	NextCursor           string              `json:"next_cursor,omitempty"`
+	HasMore              bool                `json:"has_more,omitempty"`
 	TotalBeforeTruncate  int                 `json:"total_before_truncate"`
 	Truncated            bool                `json:"truncated"`
 }
@@ -77,8 +80,15 @@ func FindReverseDependenciesWithOptions(ws *Workspace, dir, pattern, targetPacka
 	result.TotalBeforeTruncate = result.DirectCount
 
 	var directTruncated bool
-	result.DirectDependents, _, directTruncated = applyQueryWindow(result.DirectDependents, opts)
+	var serr error
+	result.DirectDependents, _, directTruncated, result.HasMore, result.NextCursor, serr = streamOrWindow(result.DirectDependents, "reverse_dependencies:"+targetPackage, reverseDependencyKey, opts)
+	if serr != nil {
+		return nil, serr
+	}
 	result.Truncated = directTruncated
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+	}
 
 	if !includeTransitive {
 		return result, nil
@@ -127,4 +137,8 @@ func FindReverseDependenciesWithOptions(ws *Workspace, dir, pattern, targetPacka
 	}
 
 	return result, nil
+}
+
+func reverseDependencyKey(d ReverseDependency) string {
+	return d.Package
 }

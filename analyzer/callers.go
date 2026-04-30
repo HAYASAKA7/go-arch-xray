@@ -18,6 +18,9 @@ type CallersResult struct {
 	Offset              int        `json:"offset,omitempty"`
 	Limit               int        `json:"limit,omitempty"`
 	MaxItems            int        `json:"max_items,omitempty"`
+	ChunkSize           int        `json:"chunk_size,omitempty"`
+	NextCursor          string     `json:"next_cursor,omitempty"`
+	HasMore             bool       `json:"has_more,omitempty"`
 	TotalBeforeTruncate int        `json:"total_before_truncate"`
 	Truncated           bool       `json:"truncated"`
 }
@@ -92,7 +95,14 @@ func FindCallersWithOptions(ws *Workspace, dir, pattern, functionName string, ma
 	result.Offset = opts.Offset
 	result.Limit = opts.Limit
 	result.MaxItems = opts.MaxItems
-	result.Edges, result.TotalBeforeTruncate, result.Truncated = applyQueryWindow(result.Edges, opts)
+	var err2 error
+	result.Edges, result.TotalBeforeTruncate, result.Truncated, result.HasMore, result.NextCursor, err2 = streamOrWindow(result.Edges, "callers:"+result.RootFunction, callEdgeKey, opts)
+	if err2 != nil {
+		return nil, err2
+	}
+	if opts.ChunkSize > 0 {
+		result.ChunkSize = opts.ChunkSize
+	}
 
 	return result, nil
 }
