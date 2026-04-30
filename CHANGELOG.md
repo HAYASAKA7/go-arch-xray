@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-04-30
+
+### Added
+
+- New `find_dead_code` MCP tool: reports unexported functions and methods
+  that have zero inbound callers in the CHA call graph or are unreachable
+  from any program entrypoint (main, init, goroutine spawn). Two
+  confidence tiers: `unreferenced` (no callers at all) and
+  `unreachable_from_entrypoint` (callers exist but the chain is dead).
+  `include_exported: true` opts into auditing exported symbols (useful
+  for internal-only modules); `include_tests: true` includes `*_test.go`
+  files. Each result carries `notes` listing CHA's blind spots
+  (reflection, plugins, cgo, `//go:linkname`) so AI clients can warn
+  before deletion. Streaming/pagination via the standard `chunk_size` +
+  `cursor` pattern.
+- New `find_duplicate_methods` MCP tool: groups functions and methods
+  whose signature matches and whose normalized body hashes match across
+  the workspace. Bodies are pretty-printed and whitespace-collapsed
+  before SHA-256 hashing; comments are stripped, so commented-out
+  variants of the same logic still group together. Identifier renames
+  remain distinct (use a similarity tool for fuzzy matches).
+  `min_body_lines` (default 3) filters out trivial collisions; results
+  are sorted with the largest groups first so the highest-impact
+  refactor candidates surface first. Supports the standard streaming
+  pagination shape. Method body fingerprints are extracted once during
+  workspace load (alongside HTTP routes and import locations) so
+  repeated calls do not re-parse source.
+
 ## [0.5.3] - 2026-04-30
 
 ### Changed

@@ -47,6 +47,12 @@ type LoadedProgram struct {
 	// full source re-parsing on every ListHTTPRoutes call.
 	httpRoutes []HTTPRoute
 
+	// methodFingerprints caches per-function/method body hashes captured
+	// during load (before pkg.Syntax is cleared). Used by
+	// FindDuplicateMethods to detect copy-pasted implementations without
+	// re-parsing source.
+	methodFingerprints []MethodFingerprint
+
 	chaOnce  sync.Once
 	chaGraph *callgraph.Graph
 }
@@ -333,6 +339,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
 	}
 	httpRoutesCache := extractRoutesFromSyntax(pkgs)
+	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
 
 	// Drop syntax / type info / file listings from every reachable package
 	// to release the bulk of go/packages memory once SSA is built. The
@@ -383,13 +390,14 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v", len(pkgs), len(funcs), dir, patterns)
 
 	return &LoadedProgram{
-		Packages:   pkgs,
-		SSA:        prog,
-		SSAFuncs:   funcs,
-		RootPaths:  rootPaths,
-		Patterns:   patterns,
-		importLocs: importLocsCache,
-		httpRoutes: httpRoutesCache,
+		Packages:           pkgs,
+		SSA:                prog,
+		SSAFuncs:           funcs,
+		RootPaths:          rootPaths,
+		Patterns:           patterns,
+		importLocs:         importLocsCache,
+		httpRoutes:         httpRoutesCache,
+		methodFingerprints: methodFingerprintsCache,
 	}, nil
 }
 

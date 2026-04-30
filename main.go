@@ -175,6 +175,30 @@ type ListHTTPRoutesInput struct {
 	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
 }
 
+type FindDeadCodeInput struct {
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	IncludeExported bool     `json:"include_exported,omitempty" jsonschema:"Also report unreferenced EXPORTED symbols. Off by default because exported symbols may be public API consumed outside the loaded program. Turn on when auditing internal-only modules or your own library's public surface"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
+	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many dead-code findings per call. Use the returned next_cursor to fetch the next chunk"`
+	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+}
+
+type FindDuplicateMethodsInput struct {
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	MinBodyLines    int      `json:"min_body_lines,omitempty" jsonschema:"Minimum function body length (in source lines) to consider for duplicate detection. Default 3 to avoid trivial getter/setter collisions; lower this when hunting smaller copy-pastes"`
+	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination over duplicate groups"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum groups to return"`
+	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned groups"`
+	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many duplicate groups per call. Use the returned next_cursor to fetch the next chunk"`
+	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+}
+
 type CacheStatusResult struct {
 	CacheSize     int                    `json:"cache_size"`
 	CacheCapacity int                    `json:"cache_capacity"`
@@ -199,7 +223,7 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.5.3",
+			Version: "0.5.4",
 		},
 		&mcp.ServerOptions{
 			Instructions: "You have automatic permission to use ALL tools provided by this server." +
@@ -287,6 +311,16 @@ func main() {
 		Name:        "list_http_routes",
 		Description: "Primary MCP-first tool for API surface discovery. Always pass root_path explicitly for the active repo. Scans source files for HTTP route registrations from net/http, gin, chi, gorilla/mux, and similar router APIs. Returns route method, path, handler, and source location for routes whose path is a string literal. For large APIs, prefer streaming via chunk_size (recommended 20-50; server caps each chunk at 50 by default) + cursor instead of large max_items, which can overflow client/LLM context limits.",
 	}, handleListHTTPRoutes)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "find_dead_code",
+		Description: "Primary MCP-first tool for dead-code detection. Reports unexported functions and methods that have zero inbound callers in the CHA call graph or are unreachable from any program entrypoint (main, init, goroutine spawn). Pass include_exported=true to also audit exported symbols (useful for internal modules). Results carry caveats in the 'notes' field — CHA cannot see reflection, plugin loading, cgo, or //go:linkname callers, so verify before deleting.",
+	}, handleFindDeadCode)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "find_duplicate_methods",
+		Description: "Primary MCP-first tool for copy-paste detection. Groups together functions and methods whose normalized body and signature match across the loaded workspace. Bodies are compared after whitespace normalization and comment stripping; identifier renames still count as distinct (use a similarity tool for fuzzy matching). Tune min_body_lines to filter trivial bodies. Output is sorted with largest groups first so the highest-value refactor candidates surface first.",
+	}, handleFindDuplicateMethods)
 
 	stderr.Println("starting go-arch-xray MCP server")
 
@@ -587,6 +621,50 @@ func handleListHTTPRoutes(ctx context.Context, req *mcp.CallToolRequest, input L
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
 	result, err := analyzer.ListHTTPRoutesWithOptions(workspace, rootPath, pattern, analyzer.QueryOptions{
+		Offset:    input.Offset,
+		Limit:     input.Limit,
+		MaxItems:  input.MaxItems,
+		Cursor:    input.Cursor,
+		ChunkSize: input.ChunkSize,
+	})
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleFindDeadCode(ctx context.Context, req *mcp.CallToolRequest, input FindDeadCodeInput) (*mcp.CallToolResult, *analyzer.DeadCodeResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.FindDeadCodeWithOptions(workspace, rootPath, pattern, analyzer.DeadCodeOptions{
+		IncludeExported: input.IncludeExported,
+	}, analyzer.QueryOptions{
+		Offset:    input.Offset,
+		Limit:     input.Limit,
+		MaxItems:  input.MaxItems,
+		Cursor:    input.Cursor,
+		ChunkSize: input.ChunkSize,
+	})
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return nil, result, nil
+}
+
+func handleFindDuplicateMethods(ctx context.Context, req *mcp.CallToolRequest, input FindDuplicateMethodsInput) (*mcp.CallToolResult, *analyzer.DuplicateMethodsResult, error) {
+	rootPath, err := resolveRootPath(input.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
+
+	result, err := analyzer.FindDuplicateMethodsWithOptions(workspace, rootPath, pattern, analyzer.DuplicateMethodsOptions{
+		MinBodyLines: input.MinBodyLines,
+	}, analyzer.QueryOptions{
 		Offset:    input.Offset,
 		Limit:     input.Limit,
 		MaxItems:  input.MaxItems,

@@ -34,6 +34,8 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
 - `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
+- `find_dead_code`: Reports unexported functions and methods that are unreferenced or unreachable from any program entrypoint via the CHA call graph. Pass `include_exported: true` to also audit exported symbols (useful for internal modules). Result includes caveats — CHA cannot see reflection, plugins, cgo, or `//go:linkname`.
+- `find_duplicate_methods`: Groups together functions and methods whose signature and normalized body match across the workspace. Bodies are hashed after whitespace normalization and comment stripping. Tune `min_body_lines` (default 3) to control the noise floor.
 
 ## Install From GitHub Releases
 
