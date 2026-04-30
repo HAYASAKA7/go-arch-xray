@@ -82,6 +82,20 @@ go build -trimpath -ldflags "-s -w" -o go-arch-xray.exe .
 
 Use the absolute path to the compiled binary.
 
+eg. Claude Code command configuration:
+
+Windows:
+
+```text
+claude mcp add go-arch-xray "Disk:\\path\\to\\go-arch-xray.exe"
+```
+
+macOS/Linux:
+
+```text
+claude mcp add go-arch-xray "/path/to/go-arch-xray"
+```
+
 Windows:
 
 ```json
