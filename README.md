@@ -33,7 +33,7 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
-- `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux). Returns route method, path, handler, framework, and source location for literal-path routes.
+- `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
 
 ## Install From GitHub Releases
 
@@ -154,6 +154,33 @@ High-volume tools also accept:
 - `offset`: Pagination start index.
 - `summary`: Return aggregate counts in addition to detailed entries.
 - `max_items`: Hard cap safety limit on returned items.
+- `chunk_size`: Page size for cursor-based streaming. When set (>0), the
+  response returns at most `chunk_size` items along with `next_cursor` and
+  `has_more`. Iterate by passing `next_cursor` back as `cursor` until
+  `has_more` is `false`.
+- `cursor`: Opaque continuation token returned by a previous streamed
+  response. Do not modify or construct manually.
+
+### Streaming vs. Pagination
+
+For slice-returning tools (`get_interface_topology`, `get_package_dependencies`,
+`find_callers`, `find_reverse_dependencies`, `check_architecture_boundaries`,
+`list_entrypoints`, `list_http_routes`, `analyze_call_hierarchy`,
+`trace_struct_lifecycle`):
+
+- Prefer cursor-based streaming (`chunk_size` 100-200 + `cursor`) over large
+  `max_items`/`limit` values. Large single payloads can overflow MCP transport
+  buffers and LLM context windows.
+- When a non-streaming response returns `truncated: true` with a large
+  `total_before_truncate`, retry with `chunk_size` instead of bumping
+  `max_items`.
+- Each streamed response carries a fingerprint of the underlying dataset.
+  If the workspace is reloaded mid-iteration, the next call returns a
+  `stream cursor invalidated` error. Restart the stream **without** `cursor`;
+  do not attempt to repair the token.
+
+The MCP server `Instructions` field tells AI clients to follow this policy
+automatically, so most clients will pick streaming without prompting.
 
 Multi-pattern example for `get_interface_topology`:
 
