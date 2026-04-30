@@ -2,11 +2,11 @@
 
 Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
 
-## What's New (0.4.5)
+## What's New (0.4.6)
 
-- **Architecture boundary checks are now cache-first**: import source locations are extracted during program load and reused by `check_architecture_boundaries`, avoiding per-request source re-parsing in normal operation.
-- **HTTP route listing is now cache-first**: route registrations are extracted from loaded syntax during workspace load and reused by `list_http_routes`, eliminating repeated full-file parsing on subsequent calls.
-- **Correctness improvement for route discovery**: route extraction now runs before compiled file lists are trimmed, so routes across all package files are captured in cache.
+- **MCP-first instruction policy**: server guidance now explicitly prioritizes MCP analysis tools over generic text/file search when understanding repository structure and relationships.
+- **Refactor pre-check/post-verify policy**: server guidance now explicitly requires MCP-based impact pre-check before refactors and MCP-based post-verification after refactors.
+- **Tool descriptions aligned with policy**: key topology tools are now labeled as primary MCP-first tools to improve agent tool-selection behavior.
 
 ## Memory note
 
@@ -126,8 +126,8 @@ If you downloaded a release asset, the extracted binary name includes the target
 Maintainers can publish a release by pushing a tag that starts with `v`:
 
 ```bash
-git tag v0.4.5
-git push origin v0.4.5
+git tag v0.4.6
+git push origin v0.4.6
 ```
 
 The GitHub Actions workflow runs tests, cross-compiles release binaries for Windows, macOS, and Linux, packages them, and attaches them to the GitHub Release.
