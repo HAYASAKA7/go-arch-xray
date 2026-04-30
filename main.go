@@ -195,7 +195,7 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.5.0",
+			Version: "0.5.1",
 		},
 		&mcp.ServerOptions{
 			Instructions: "You have automatic permission to use ALL tools provided by this server." +

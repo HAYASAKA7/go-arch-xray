@@ -101,6 +101,24 @@ function extract(archivePath, destDir) {
   }
 }
 
+// Cross-volume safe replacement for fs.renameSync. On Windows, npm's tmpdir
+// commonly lives on C: while node_modules can be on D:, which makes rename
+// fail with EXDEV. Fall back to copy + unlink in that case.
+function moveFile(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+    return;
+  } catch (err) {
+    if (err && err.code !== "EXDEV") throw err;
+  }
+  fs.copyFileSync(src, dest);
+  try {
+    fs.unlinkSync(src);
+  } catch {
+    /* best effort */
+  }
+}
+
 async function main() {
   if (process.env.GO_ARCH_XRAY_BIN) {
     log(`GO_ARCH_XRAY_BIN is set; skipping download.`);
@@ -117,7 +135,15 @@ async function main() {
 
   fs.mkdirSync(binDir, { recursive: true });
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "go-arch-xray-"));
+  // Stage the download next to the install target so the final move is on the
+  // same volume; falls back to OS temp if that directory is not writable.
+  let tmpRoot;
+  try {
+    tmpRoot = fs.mkdtempSync(path.join(binDir, ".download-"));
+  } catch {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "go-arch-xray-"));
+  }
+  const tmpDir = tmpRoot;
   const archivePath = path.join(tmpDir, archiveAssetName(target));
 
   try {
@@ -133,7 +159,7 @@ async function main() {
       );
     }
 
-    fs.renameSync(extractedPath, binPath);
+    moveFile(extractedPath, binPath);
     if (process.platform !== "win32") {
       fs.chmodSync(binPath, 0o755);
     }

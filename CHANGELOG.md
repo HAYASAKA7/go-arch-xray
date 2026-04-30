@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-04-30
+
+### Fixed
+
+- npm `install.js` failed with `EXDEV: cross-device link not permitted`
+  when the system temp directory and `node_modules` lived on different
+  Windows volumes (e.g. temp on `C:`, project on `D:`). The downloader
+  now stages the archive on the same volume as the install target when
+  possible, and falls back to a copy + unlink when the final move would
+  cross a volume boundary.
+- Server version bumped to `0.5.1`.
+
 ## [0.5.0] - 2026-04-30
 
 ### Added
