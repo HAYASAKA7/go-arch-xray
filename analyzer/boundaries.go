@@ -150,7 +150,7 @@ func CheckArchitectureBoundariesWithOptions(ws *Workspace, dir, pattern string, 
 		return nil, err2
 	}
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 	}
 
 	if opts.Export != ExportNone {

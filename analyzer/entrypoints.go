@@ -152,7 +152,7 @@ func ListEntrypointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOp
 		return nil, err2
 	}
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 	}
 
 	return result, nil

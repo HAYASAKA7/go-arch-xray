@@ -111,7 +111,7 @@ func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOpt
 	}
 
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 		firstKey, lastKey := httpRouteBoundaryKeys(routes)
 		chunk, _, nextCursor, hasMore, serr := applyStreamWindow(routes, "http_routes:"+dir+"|"+pattern, firstKey, lastKey, StreamOptions{Cursor: opts.Cursor, ChunkSize: opts.ChunkSize})
 		if serr != nil {

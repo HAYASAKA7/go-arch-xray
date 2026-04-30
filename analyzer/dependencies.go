@@ -100,7 +100,7 @@ func GetPackageDependenciesWithOptions(ws *Workspace, dir, pattern string, inclu
 	result.HasMore = hasMore
 	result.NextCursor = nextCursor
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 	}
 
 	if opts.Export != ExportNone {

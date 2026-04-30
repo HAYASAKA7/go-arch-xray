@@ -101,7 +101,7 @@ func FindCallersWithOptions(ws *Workspace, dir, pattern, functionName string, ma
 		return nil, err2
 	}
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 	}
 
 	return result, nil

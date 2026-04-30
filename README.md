@@ -210,9 +210,13 @@ For slice-returning tools (`get_interface_topology`, `get_package_dependencies`,
 `list_entrypoints`, `list_http_routes`, `analyze_call_hierarchy`,
 `trace_struct_lifecycle`):
 
-- Prefer cursor-based streaming (`chunk_size` 100-200 + `cursor`) over large
+- Prefer cursor-based streaming (`chunk_size` 20-50 + `cursor`) over large
   `max_items`/`limit` values. Large single payloads can overflow MCP transport
   buffers and LLM context windows.
+- The server caps every chunk at **50 items** by default to protect AI
+  context budgets — values above 50 are silently clamped. Override with the
+  `GO_ARCH_XRAY_MAX_CHUNK_SIZE` environment variable when running against
+  transports/clients that can handle larger responses.
 - When a non-streaming response returns `truncated: true` with a large
   `total_before_truncate`, retry with `chunk_size` instead of bumping
   `max_items`.

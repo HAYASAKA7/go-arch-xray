@@ -160,7 +160,7 @@ func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName s
 	}
 
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 		firstKey, lastKey := callEdgeBoundaryKeys(result.Edges)
 		chunk, total, nextCursor, hasMore, serr := applyStreamWindow(result.Edges, "call_hierarchy:"+result.RootFunction, firstKey, lastKey, StreamOptions{Cursor: opts.Cursor, ChunkSize: opts.ChunkSize})
 		if serr != nil {

@@ -116,7 +116,7 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string, opts L
 	}
 
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 		firstKey, lastKey := lifecycleHopBoundaryKeys(result.Hops)
 		chunk, _, nextCursor, hasMore, serr := applyStreamWindow(result.Hops, "lifecycle:"+result.Struct+"|"+result.DedupeMode, firstKey, lastKey, StreamOptions{Cursor: opts.Cursor, ChunkSize: opts.ChunkSize})
 		if serr != nil {

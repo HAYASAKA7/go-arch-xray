@@ -113,7 +113,7 @@ func GetInterfaceTopologyWithOptions(ws *Workspace, dir, pattern, ifaceName stri
 		return nil, err
 	}
 	if opts.ChunkSize > 0 {
-		result.ChunkSize = opts.ChunkSize
+		result.ChunkSize = clampChunkSize(opts.ChunkSize)
 	}
 	if opts.Summary {
 		result.Summary = &TopologySummary{

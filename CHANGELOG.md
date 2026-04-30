@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-04-30
+
+### Changed
+
+- `chunk_size` is now silently capped at **50 items per chunk** by default
+  to keep streamed responses inside typical LLM context budgets. AI
+  clients frequently picked 100-200 from earlier guidance, which produced
+  ~10-12k token responses that overflowed context windows. The cap is
+  enforced centrally in the streaming layer, so all slice-returning tools
+  benefit. Callers that explicitly need larger chunks (e.g. local CLI
+  consumers writing to disk) can raise the cap with the
+  `GO_ARCH_XRAY_MAX_CHUNK_SIZE` environment variable. The reported
+  `chunk_size` in each response now reflects the effective applied value
+  rather than the requested one. Server `Instructions` and tool
+  descriptions updated to recommend `chunk_size` 20-50.
+
 ## [0.5.2] - 2026-04-30
 
 ### Added
@@ -24,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary diagrams highlight violating edges (dashed) and source packages
   ("violation" class) for visual emphasis. Default behavior is unchanged
   when `export` is omitted.
+
+
 
 ## [0.5.1] - 2026-04-30
 

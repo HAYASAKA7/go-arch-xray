@@ -78,6 +78,11 @@ func applyStreamWindow[T any](items []T, identifier, firstKey, lastKey string, o
 	total = len(items)
 	fingerprint := streamFingerprint(identifier, total, firstKey, lastKey)
 
+	// Defensive clamp so the streaming layer never emits more items per
+	// chunk than the server-side cap allows, even when an upstream caller
+	// forwards opts.ChunkSize without going through normalizeQueryOptions.
+	opts.ChunkSize = clampChunkSize(opts.ChunkSize)
+
 	offset := 0
 	if opts.Cursor != "" {
 		c, decErr := decodeStreamCursor(opts.Cursor)
@@ -119,6 +124,7 @@ func applyStreamWindow[T any](items []T, identifier, firstKey, lastKey string, o
 // When streaming, MaxItems is applied first as a global cap on the
 // addressable dataset so successive chunks see a consistent total.
 func streamOrWindow[T any](items []T, identifier string, keyFn func(T) string, opts QueryOptions) (chunk []T, total int, truncated, hasMore bool, nextCursor string, err error) {
+	opts.ChunkSize = clampChunkSize(opts.ChunkSize)
 	if opts.ChunkSize <= 0 {
 		chunk, total, truncated = applyQueryWindow(items, opts)
 		return chunk, total, truncated, false, "", nil
