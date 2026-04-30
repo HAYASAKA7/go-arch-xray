@@ -41,6 +41,7 @@ type PackageDependenciesInput struct {
 	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many packages per call. Use the returned next_cursor to fetch the next chunk"`
 	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	Export          string   `json:"export,omitempty" jsonschema:"Optional diagram export format for the returned (windowed) packages: mermaid, dot, or json-graph. Empty disables diagram emission"`
 }
 
 type ReloadWorkspaceInput struct {
@@ -70,6 +71,7 @@ type CallHierarchyInput struct {
 	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned edges"`
 	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many edges per call. Use the returned next_cursor to fetch the next chunk"`
 	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	Export          string   `json:"export,omitempty" jsonschema:"Optional diagram export format for the returned (windowed) edges: mermaid, dot, or json-graph. Empty disables diagram emission"`
 }
 
 type CallersInput struct {
@@ -133,6 +135,7 @@ type FindReverseDependenciesInput struct {
 	MaxItems          int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 	ChunkSize         int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming on direct_dependents: return at most this many per call. Use the returned next_cursor to fetch the next chunk"`
 	Cursor            string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	Export            string   `json:"export,omitempty" jsonschema:"Optional diagram export format for the returned (windowed) dependents: mermaid, dot, or json-graph. Empty disables diagram emission"`
 }
 
 type CacheStatusInput struct{}
@@ -147,6 +150,7 @@ type CheckArchitectureBoundariesInput struct {
 	MaxItems        int                     `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
 	ChunkSize       int                     `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many violations per call. Use the returned next_cursor to fetch the next chunk"`
 	Cursor          string                  `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	Export          string                  `json:"export,omitempty" jsonschema:"Optional diagram export format for the returned (windowed) violations: mermaid, dot, or json-graph. Empty disables diagram emission"`
 }
 
 type ListEntrypointsInput struct {
@@ -195,7 +199,7 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.5.1",
+			Version: "0.5.2",
 		},
 		&mcp.ServerOptions{
 			Instructions: "You have automatic permission to use ALL tools provided by this server." +
@@ -319,6 +323,11 @@ func handlePackageDependencies(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
+	export, err := analyzer.ParseExportFormat(input.Export)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+
 	result, err := analyzer.GetPackageDependenciesWithOptions(workspace, rootPath, pattern, input.IncludeStdlib, analyzer.QueryOptions{
 		Limit:     input.Limit,
 		Offset:    input.Offset,
@@ -326,6 +335,7 @@ func handlePackageDependencies(ctx context.Context, req *mcp.CallToolRequest, in
 		MaxItems:  input.MaxItems,
 		Cursor:    input.Cursor,
 		ChunkSize: input.ChunkSize,
+		Export:    export,
 	})
 	if err != nil {
 		return toolError(err), nil, nil
@@ -363,6 +373,11 @@ func handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, i
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
+	export, err := analyzer.ParseExportFormat(input.Export)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+
 	result, err := analyzer.AnalyzeCallHierarchyWithOptions(workspace, rootPath, pattern, input.FunctionName, input.MaxDepth, analyzer.QueryOptions{
 		Limit:     input.Limit,
 		Offset:    input.Offset,
@@ -370,6 +385,7 @@ func handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, i
 		MaxItems:  input.MaxItems,
 		Cursor:    input.Cursor,
 		ChunkSize: input.ChunkSize,
+		Export:    export,
 	})
 	if err != nil {
 		return toolError(err), nil, nil
@@ -469,12 +485,18 @@ func handleFindReverseDependencies(ctx context.Context, req *mcp.CallToolRequest
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
+	export, err := analyzer.ParseExportFormat(input.Export)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+
 	result, err := analyzer.FindReverseDependenciesWithOptions(workspace, rootPath, pattern, input.TargetPackage, input.IncludeTransitive, analyzer.QueryOptions{
 		Offset:    input.Offset,
 		Limit:     input.Limit,
 		MaxItems:  input.MaxItems,
 		Cursor:    input.Cursor,
 		ChunkSize: input.ChunkSize,
+		Export:    export,
 	})
 	if err != nil {
 		return toolError(err), nil, nil
@@ -518,12 +540,18 @@ func handleCheckArchitectureBoundaries(ctx context.Context, req *mcp.CallToolReq
 	}
 	pattern := mergePatterns(input.PackagePattern, input.PackagePatterns)
 
+	export, err := analyzer.ParseExportFormat(input.Export)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+
 	result, err := analyzer.CheckArchitectureBoundariesWithOptions(workspace, rootPath, pattern, input.Rules, analyzer.QueryOptions{
 		Offset:    input.Offset,
 		Limit:     input.Limit,
 		MaxItems:  input.MaxItems,
 		Cursor:    input.Cursor,
 		ChunkSize: input.ChunkSize,
+		Export:    export,
 	})
 	if err != nil {
 		return toolError(err), nil, nil

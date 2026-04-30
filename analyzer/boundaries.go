@@ -58,6 +58,7 @@ type BoundaryResult struct {
 	HasMore             bool                `json:"has_more,omitempty"`
 	TotalBeforeTruncate int                 `json:"total_before_truncate"`
 	Truncated           bool                `json:"truncated"`
+	Diagram             string              `json:"diagram,omitempty"`
 }
 
 // CheckArchitectureBoundaries evaluates all packages in the loaded workspace
@@ -152,7 +153,24 @@ func CheckArchitectureBoundariesWithOptions(ws *Workspace, dir, pattern string, 
 		result.ChunkSize = opts.ChunkSize
 	}
 
+	if opts.Export != ExportNone {
+		result.Diagram = RenderGraph(buildBoundaryGraph(result.Violations), opts.Export)
+	}
+
 	return result, nil
+}
+
+// buildBoundaryGraph renders the windowed violation slice as a directed
+// graph where each violating edge is dashed and the offending source
+// package is classified as "violation" so renderers highlight it.
+func buildBoundaryGraph(violations []BoundaryViolation) Graph {
+	b := newGraphBuilder("architecture_boundaries", "LR")
+	for _, v := range violations {
+		b.addNode(v.From, "violation")
+		b.addNode(v.Import, "")
+		b.addEdge(v.From, v.Import, v.Rule, "dashed")
+	}
+	return b.build()
 }
 
 func boundaryViolationKey(v BoundaryViolation) string {

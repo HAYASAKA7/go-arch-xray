@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"sort"
 	"strings"
 
@@ -41,7 +42,7 @@ var routeMethod = map[string]string{
 	// net/http and gorilla/mux
 	"HandleFunc": "ANY",
 	"Handle":     "ANY",
-	// gin-gonic: uppercase method names
+	// gin-gonic and fasthttp/router: uppercase method names
 	"GET":     "GET",
 	"POST":    "POST",
 	"PUT":     "PUT",
@@ -49,6 +50,9 @@ var routeMethod = map[string]string{
 	"DELETE":  "DELETE",
 	"HEAD":    "HEAD",
 	"OPTIONS": "OPTIONS",
+	"CONNECT": "CONNECT",
+	"TRACE":   "TRACE",
+	"ANY":     "ANY", // fasthttp/router
 	// chi / echo / fiber: title-case method names
 	"Get":     "GET",
 	"Post":    "POST",
@@ -57,6 +61,10 @@ var routeMethod = map[string]string{
 	"Delete":  "DELETE",
 	"Head":    "HEAD",
 	"Options": "OPTIONS",
+	"Connect": "CONNECT", // echfiber, fasthttp/router, and gorilla/mux router
+	// APIs.Trace":   "TRACE",   // echo / fiber
+	"Any": "ANY", // echo / gin
+	"All": "ANY", // fiber
 }
 
 // ListHTTPRoutes scans loaded packages for HTTP route registrations from
@@ -144,13 +152,14 @@ func extractRoutesFromSyntax(pkgs []*packages.Package) []HTTPRoute {
 		if pkg.Fset == nil || len(pkg.Syntax) == 0 {
 			continue
 		}
+		info := pkg.TypesInfo
 		for _, file := range pkg.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
-				if route := extractHTTPRoute(call, pkg.Fset); route != nil {
+				if route := extractHTTPRoute(call, pkg.Fset, info); route != nil {
 					routes = append(routes, *route)
 				}
 				return true
@@ -162,7 +171,7 @@ func extractRoutesFromSyntax(pkgs []*packages.Package) []HTTPRoute {
 
 // extractHTTPRoute attempts to parse a *ast.CallExpr as a route registration.
 // Returns nil when the expression does not match a known router pattern.
-func extractHTTPRoute(call *ast.CallExpr, fset *token.FileSet) *HTTPRoute {
+func extractHTTPRoute(call *ast.CallExpr, fset *token.FileSet, info *types.Info) *HTTPRoute {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return nil
@@ -186,7 +195,7 @@ func extractHTTPRoute(call *ast.CallExpr, fset *token.FileSet) *HTTPRoute {
 	routePath := strings.Trim(lit.Value, `"`)
 
 	handler := handlerExprName(call.Args[1])
-	framework := inferFramework(sel)
+	framework := inferFramework(sel, info)
 
 	pos := fset.Position(call.Pos())
 	return &HTTPRoute{
@@ -218,9 +227,69 @@ func handlerExprName(expr ast.Expr) string {
 	}
 }
 
-// inferFramework guesses which HTTP framework is being used based on the
-// method name and the receiver expression.
-func inferFramework(sel *ast.SelectorExpr) string {
+// inferFramework guesses which HTTP framework is being used. When type
+// information is available the receiver type's package path is the most
+// reliable signal; otherwise it falls back to method-name and receiver-name
+// heuristics so test fixtures (which mock router types in package main)
+// still resolve to a sensible framework.
+func inferFramework(sel *ast.SelectorExpr, info *types.Info) string {
+	if fw := frameworkFromTypes(sel, info); fw != "" {
+		return fw
+	}
+	return inferFrameworkHeuristic(sel)
+}
+
+// frameworkFromTypes resolves the receiver expression's type and matches it
+// against well-known framework package paths. Returns "" when the receiver
+// type cannot be resolved or is not a recognized framework type.
+func frameworkFromTypes(sel *ast.SelectorExpr, info *types.Info) string {
+	if info == nil {
+		return ""
+	}
+	tv, ok := info.Types[sel.X]
+	if !ok || tv.Type == nil {
+		return ""
+	}
+	t := tv.Type
+	if p, ok := t.(*types.Pointer); ok {
+		t = p.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok {
+		return ""
+	}
+	obj := named.Obj()
+	if obj == nil {
+		return ""
+	}
+	pkgPath := ""
+	if obj.Pkg() != nil {
+		pkgPath = obj.Pkg().Path()
+	}
+	switch {
+	case pkgPath == "net/http",
+		strings.HasPrefix(pkgPath, "net/http/"):
+		return "net/http"
+	case strings.HasPrefix(pkgPath, "github.com/labstack/echo"):
+		return "echo"
+	case strings.HasPrefix(pkgPath, "github.com/gofiber/fiber"):
+		return "fiber"
+	case strings.HasPrefix(pkgPath, "github.com/valyala/fasthttp"),
+		strings.HasPrefix(pkgPath, "github.com/fasthttp/router"):
+		return "fasthttp"
+	case strings.HasPrefix(pkgPath, "github.com/go-chi/chi"):
+		return "chi"
+	case strings.HasPrefix(pkgPath, "github.com/gin-gonic/gin"):
+		return "gin"
+	case strings.HasPrefix(pkgPath, "github.com/gorilla/mux"):
+		return "gorilla/mux"
+	}
+	return ""
+}
+
+// inferFrameworkHeuristic guesses a framework based on method spelling and
+// receiver identifier when no type information is available.
+func inferFrameworkHeuristic(sel *ast.SelectorExpr) string {
 	method := sel.Sel.Name
 	switch method {
 	case "HandleFunc", "Handle":
@@ -235,7 +304,15 @@ func inferFramework(sel *ast.SelectorExpr) string {
 			}
 		}
 		return "net/http"
-	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+	case "All":
+		return "fiber"
+	case "ANY":
+		return "fasthttp"
+	case "Any":
+		return "echo"
+	case "Connect", "Trace":
+		return "echo"
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE":
 		return "gin"
 	case "Get", "Post", "Put", "Patch", "Delete", "Head", "Options":
 		return "chi"

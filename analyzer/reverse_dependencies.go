@@ -26,6 +26,7 @@ type ReverseDependenciesResult struct {
 	HasMore              bool                `json:"has_more,omitempty"`
 	TotalBeforeTruncate  int                 `json:"total_before_truncate"`
 	Truncated            bool                `json:"truncated"`
+	Diagram              string              `json:"diagram,omitempty"`
 }
 
 // FindReverseDependencies returns the set of packages (within the loaded
@@ -136,7 +137,33 @@ func FindReverseDependenciesWithOptions(ws *Workspace, dir, pattern, targetPacka
 		result.Truncated = true
 	}
 
+	if opts.Export != ExportNone {
+		result.Diagram = RenderGraph(buildReverseDependencyGraph(result.TargetPackage, result.DirectDependents, result.TransitiveDependents), opts.Export)
+	}
+
 	return result, nil
+}
+
+// buildReverseDependencyGraph renders the windowed dependents pointing at the
+// target package. The target node is classified "target" so renderers can
+// highlight it; transitive dependents are connected through their nearest
+// known intermediate when possible (and otherwise to the target directly).
+func buildReverseDependencyGraph(target string, direct []ReverseDependency, transitive []string) Graph {
+	b := newGraphBuilder("reverse_dependencies:"+target, "LR")
+	if target != "" {
+		b.addNode(target, "target")
+	}
+	for _, d := range direct {
+		b.addEdge(d.Package, target, "", "")
+	}
+	// Transitive dependents are emitted as dashed edges pointing at the target
+	// since the intermediate path is not retained on the result. This keeps the
+	// diagram informative without overstating the precise import chain.
+	for _, t := range transitive {
+		b.addNode(t, "")
+		b.addEdge(t, target, "transitive", "dashed")
+	}
+	return b.build()
 }
 
 func reverseDependencyKey(d ReverseDependency) string {

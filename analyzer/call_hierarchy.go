@@ -58,6 +58,7 @@ type CallHierarchyResult struct {
 	Truncated           bool                  `json:"truncated,omitempty"`
 	Summary             *CallHierarchySummary `json:"summary,omitempty"`
 	Edges               []CallEdge            `json:"edges"`
+	Diagram             string                `json:"diagram,omitempty"`
 }
 
 type CallHierarchySummary struct {
@@ -170,6 +171,9 @@ func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName s
 		result.Edges = chunk
 		result.NextCursor = nextCursor
 		result.HasMore = hasMore
+		if opts.Export != ExportNone {
+			result.Diagram = RenderGraph(buildCallHierarchyGraph(result.RootFunction, result.Edges), opts.Export)
+		}
 		return result, nil
 	}
 
@@ -178,7 +182,25 @@ func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName s
 	result.Truncated = truncated
 	result.Edges = window
 
+	if opts.Export != ExportNone {
+		result.Diagram = RenderGraph(buildCallHierarchyGraph(result.RootFunction, result.Edges), opts.Export)
+	}
+
 	return result, nil
+}
+
+// buildCallHierarchyGraph renders the windowed edge slice as a top-down call
+// tree. The root function is highlighted with the "root" class so renderers
+// that understand classDef can visually emphasize it.
+func buildCallHierarchyGraph(root string, edges []CallEdge) Graph {
+	b := newGraphBuilder("call_hierarchy:"+root, "TD")
+	if root != "" {
+		b.addNode(root, "root")
+	}
+	for _, e := range edges {
+		b.addEdge(e.Caller, e.Callee, e.CallType, "")
+	}
+	return b.build()
 }
 
 func callEdgeBoundaryKeys(edges []CallEdge) (firstKey, lastKey string) {

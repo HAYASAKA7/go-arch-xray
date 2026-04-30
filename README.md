@@ -33,7 +33,7 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
-- `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
+- `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
 
 ## Install From GitHub Releases
 
@@ -223,6 +223,34 @@ For slice-returning tools (`get_interface_topology`, `get_package_dependencies`,
 
 The MCP server `Instructions` field tells AI clients to follow this policy
 automatically, so most clients will pick streaming without prompting.
+
+### Graph Diagram Export
+
+`get_package_dependencies`, `analyze_call_hierarchy`,
+`check_architecture_boundaries`, and `find_reverse_dependencies` accept an
+optional `export` parameter:
+
+- `mermaid` — Markdown-renderable Mermaid diagram (`graph LR` / `graph TD`).
+  Boundary violations and roots/targets are tagged with classes
+  (`violation`, `root`, `target`) for visual emphasis.
+- `dot` — Graphviz `digraph` source, suitable for `dot -Tsvg`.
+- `json-graph` — Plain `{nodes, edges}` JSON for custom visualizations.
+
+When `export` is provided the response gains a `diagram` field populated with
+the rendered string. Diagrams reflect only the current pagination/streaming
+window, so payload size stays bounded by the same `limit`/`max_items`/
+`chunk_size` controls. Default behavior (no `export`) is unchanged.
+
+Example boundary check with diagram:
+
+```json
+{
+  "root_path": "D:\\Projects\\ExampleGoProject",
+  "package_pattern": "./...",
+  "rules": [{"type": "forbid", "from": "example.com/project/api/", "to": "example.com/project/repo/"}],
+  "export": "mermaid"
+}
+```
 
 Multi-pattern example for `get_interface_topology`:
 

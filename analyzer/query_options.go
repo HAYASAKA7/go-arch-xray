@@ -15,6 +15,11 @@ type QueryOptions struct {
 	Summary   bool
 	Cursor    string
 	ChunkSize int
+	// Export selects an optional diagram representation rendered into the
+	// result's Diagram field. Zero value (ExportNone) preserves the
+	// historical JSON-only payload, so adding this option is fully
+	// backward-compatible for callers that omit it.
+	Export ExportFormat
 }
 
 func normalizeQueryOptions(opts QueryOptions) QueryOptions {

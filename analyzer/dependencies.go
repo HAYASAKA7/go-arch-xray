@@ -26,6 +26,7 @@ type DependencyResult struct {
 	Truncated           bool                `json:"truncated,omitempty"`
 	Summary             *DependencySummary  `json:"summary,omitempty"`
 	Packages            []PackageDependency `json:"packages"`
+	Diagram             string              `json:"diagram,omitempty"`
 }
 
 type DependencySummary struct {
@@ -102,7 +103,28 @@ func GetPackageDependenciesWithOptions(ws *Workspace, dir, pattern string, inclu
 		result.ChunkSize = opts.ChunkSize
 	}
 
+	if opts.Export != ExportNone {
+		result.Diagram = RenderGraph(buildDependencyGraph(result.Packages), opts.Export)
+	}
+
 	return result, nil
+}
+
+// buildDependencyGraph constructs a directed graph where each package points
+// at every package it imports. Only the packages and imports present in the
+// supplied window are rendered, so the diagram respects the same pagination
+// limits the JSON payload reports.
+func buildDependencyGraph(pkgs []PackageDependency) Graph {
+	b := newGraphBuilder("package_dependencies", "LR")
+	for _, pkg := range pkgs {
+		b.addNode(pkg.Package, "")
+	}
+	for _, pkg := range pkgs {
+		for _, imp := range pkg.Imports {
+			b.addEdge(pkg.Package, imp, "", "")
+		}
+	}
+	return b.build()
 }
 
 func packageDependencyKey(p PackageDependency) string {

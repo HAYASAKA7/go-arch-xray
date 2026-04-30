@@ -220,3 +220,141 @@ func main() {
 		t.Fatalf("expected route /b at offset 1, got %s", result.Routes[0].Path)
 	}
 }
+
+func TestListHTTPRoutes_EchoStyleRoutes(t *testing.T) {
+	dir := createDependencyTestModule(t, "routes_echo", map[string]string{
+		"main.go": `package main
+
+type Echo struct{}
+
+func (e *Echo) GET(path string, h func()) {}
+func (e *Echo) POST(path string, h func()) {}
+func (e *Echo) Any(path string, h func()) {}
+func (e *Echo) CONNECT(path string, h func()) {}
+
+func list() {}
+func create() {}
+func anything() {}
+func tunnel() {}
+
+func main() {
+	e := &Echo{}
+	e.GET("/items", list)
+	e.POST("/items", create)
+	e.Any("/proxy", anything)
+	e.CONNECT("/tunnel", tunnel)
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := ListHTTPRoutes(ws, dir, "./...")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Total != 4 {
+		t.Fatalf("expected 4 routes, got %d: %+v", result.Total, result.Routes)
+	}
+
+	byPath := make(map[string]HTTPRoute, len(result.Routes))
+	for _, r := range result.Routes {
+		byPath[r.Path] = r
+	}
+	if r := byPath["/proxy"]; r.Method != "ANY" || r.Framework != "echo" {
+		t.Errorf("expected /proxy method=ANY framework=echo, got method=%s framework=%s", r.Method, r.Framework)
+	}
+	if r := byPath["/tunnel"]; r.Method != "CONNECT" {
+		t.Errorf("expected /tunnel method=CONNECT, got %s", r.Method)
+	}
+	// GET/POST on a fake Echo type are ambiguous to the heuristic (defaults to gin),
+	// but type info should not be available in this fixture; ensure framework is at least set.
+	if r := byPath["/items"]; r.Framework == "" {
+		t.Errorf("expected non-empty framework for /items, got %+v", r)
+	}
+}
+
+func TestListHTTPRoutes_FiberStyleRoutes(t *testing.T) {
+	dir := createDependencyTestModule(t, "routes_fiber", map[string]string{
+		"main.go": `package main
+
+type App struct{}
+
+func (a *App) Get(path string, h func()) {}
+func (a *App) All(path string, h func()) {}
+
+func showItem() {}
+func anyItem() {}
+
+func main() {
+	app := &App{}
+	app.Get("/show", showItem)
+	app.All("/any", anyItem)
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := ListHTTPRoutes(ws, dir, "./...")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Total != 2 {
+		t.Fatalf("expected 2 routes, got %d: %+v", result.Total, result.Routes)
+	}
+
+	byPath := make(map[string]HTTPRoute, len(result.Routes))
+	for _, r := range result.Routes {
+		byPath[r.Path] = r
+	}
+	if r := byPath["/any"]; r.Method != "ANY" || r.Framework != "fiber" {
+		t.Errorf("expected /any method=ANY framework=fiber, got method=%s framework=%s", r.Method, r.Framework)
+	}
+	// Get on a bare title-case method without type info defaults to chi.
+	if r := byPath["/show"]; r.Method != "GET" {
+		t.Errorf("expected /show method=GET, got %s", r.Method)
+	}
+}
+
+func TestListHTTPRoutes_FastHTTPStyleRoutes(t *testing.T) {
+	dir := createDependencyTestModule(t, "routes_fasthttp", map[string]string{
+		"main.go": `package main
+
+type Router struct{}
+
+func (r *Router) GET(path string, h func()) {}
+func (r *Router) ANY(path string, h func()) {}
+
+func showItem() {}
+func anyItem() {}
+
+func main() {
+	router := &Router{}
+	router.GET("/show", showItem)
+	router.ANY("/any", anyItem)
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := ListHTTPRoutes(ws, dir, "./...")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Total != 2 {
+		t.Fatalf("expected 2 routes, got %d: %+v", result.Total, result.Routes)
+	}
+
+	byPath := make(map[string]HTTPRoute, len(result.Routes))
+	for _, r := range result.Routes {
+		byPath[r.Path] = r
+	}
+	if r := byPath["/any"]; r.Method != "ANY" || r.Framework != "fasthttp" {
+		t.Errorf("expected /any method=ANY framework=fasthttp, got method=%s framework=%s", r.Method, r.Framework)
+	}
+	if r := byPath["/show"]; r.Method != "GET" {
+		t.Errorf("expected /show method=GET, got %s", r.Method)
+	}
+}
