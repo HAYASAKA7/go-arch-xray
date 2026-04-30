@@ -95,6 +95,14 @@ go build -trimpath -ldflags "-s -w" -o go-arch-xray.exe .
 
 ## MCP Host Configuration
 
+If you installed via npm, use the `npx` command configuration shown in the next section so MCP hosts don't need an absolute path.
+
+eg. You can install for Claude Code with:
+
+```text
+claude mcp add go-arch-xray -- npx -y @hayasaka7/go-arch-xray
+```
+
 Use the absolute path to the compiled binary.
 
 eg. Claude Code command configuration:
