@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-05-06
+
+### Added
+
+- Extended `compute_complexity_metrics` with per-function Halstead
+  metrics: distinct/total operators, distinct/total operands,
+  vocabulary, length, volume, difficulty, and effort.
+- Added `maintainability_index` as a bounded 0-100 heuristic score
+  combining Halstead volume, cyclomatic complexity, and body lines.
+  Lower scores are intended to rank functions that deserve earlier
+  refactor review.
+- Added `min_halstead_volume`, `max_maintainability_index`, and new
+  `sort_by` modes for `halstead_volume`, `halstead_difficulty`,
+  `halstead_effort`, and `maintainability`.
+- Expanded package rollups with Halstead volume and maintainability
+  aggregates for package-level debt scans.
+- Server `Instructions` and tool descriptions now tell AI clients when
+  to use Halstead and maintainability metrics, and clarify that these
+  metrics are heuristic ranking signals rather than absolute quality
+  scores.
+
 ## [0.5.7] - 2026-05-06
 
 ### Added

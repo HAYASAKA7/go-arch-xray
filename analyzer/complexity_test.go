@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"math"
 	"testing"
 )
 
@@ -103,6 +104,27 @@ func TestAnalyzeFuncComplexity_ControlFlowScores(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFuncHalstead_CountsOperatorsOperands(t *testing.T) {
+	fd := parseSingleFunc(t, `func sample(a, b int) int {
+	total := a + b
+	return total
+}`)
+
+	metrics := analyzeFuncHalstead(fd)
+	if metrics.DistinctOperators != 3 || metrics.TotalOperators != 3 {
+		t.Fatalf("unexpected operator counts: %+v", metrics)
+	}
+	if metrics.DistinctOperands != 3 || metrics.TotalOperands != 4 {
+		t.Fatalf("unexpected operand counts: %+v", metrics)
+	}
+	if metrics.Vocabulary != 6 || metrics.Length != 7 {
+		t.Fatalf("unexpected vocabulary/length: %+v", metrics)
+	}
+	assertFloatClose(t, metrics.Volume, 18.09, 0.01)
+	assertFloatClose(t, metrics.Difficulty, 2.0, 0.01)
+	assertFloatClose(t, metrics.Effort, 36.19, 0.01)
+}
+
 func TestComputeComplexityMetrics_FiltersSortsAndSummarizes(t *testing.T) {
 	dir := createDependencyTestModule(t, "complexity_basic", map[string]string{
 		"main.go": `package main
@@ -195,6 +217,57 @@ func deep(x int) int {
 	}
 }
 
+func TestComputeComplexityMetrics_HalsteadMaintainabilityFiltersAndSorts(t *testing.T) {
+	dir := createDependencyTestModule(t, "complexity_halstead", map[string]string{
+		"main.go": `package quality
+
+func simple() int {
+	return 1
+}
+
+func dense(a, b, c, d int) int {
+	result := ((a + b) * (c - d)) / (a + 1)
+	if result > 10 {
+		return result
+	}
+	return result + b
+}
+`,
+	})
+	ws := NewWorkspace()
+	result, err := ComputeComplexityMetricsWithOptions(ws, dir, "./...", ComplexityOptions{
+		MinHalsteadVolume: 10,
+		SortBy:            complexitySortMaintainability,
+		IncludePackages:   true,
+	}, QueryOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Total != 1 {
+		t.Fatalf("expected one function after min_halstead_volume filter, got %+v", result)
+	}
+	function := result.Functions[0]
+	if function.Name != "dense" {
+		t.Fatalf("expected dense function, got %+v", result.Functions)
+	}
+	if function.HalsteadVolume <= 10 || function.HalsteadEffort <= function.HalsteadVolume {
+		t.Fatalf("expected populated Halstead metrics: %+v", function)
+	}
+	if function.MaintainabilityIndex <= 0 || function.MaintainabilityIndex >= 100 {
+		t.Fatalf("expected bounded maintainability index: %+v", function)
+	}
+	if len(result.Packages) != 1 {
+		t.Fatalf("expected one package aggregate, got %+v", result.Packages)
+	}
+	aggregate := result.Packages[0]
+	if aggregate.FunctionCount != 2 {
+		t.Fatalf("package aggregate should include all functions before filters, got %+v", aggregate)
+	}
+	if aggregate.MaxHalsteadFunction == "" || aggregate.MinMaintainabilityFunction == "" {
+		t.Fatalf("expected Halstead and maintainability maxima in aggregate: %+v", aggregate)
+	}
+}
+
 func TestComputeComplexityMetrics_Streaming(t *testing.T) {
 	dir := createDependencyTestModule(t, "complexity_stream", map[string]string{
 		"main.go": `package main
@@ -238,4 +311,11 @@ func parseSingleFunc(t *testing.T, src string) *ast.FuncDecl {
 	}
 	t.Fatal("no function declaration found")
 	return nil
+}
+
+func assertFloatClose(t *testing.T, got, want, tolerance float64) {
+	t.Helper()
+	if math.Abs(got-want) > tolerance {
+		t.Fatalf("got %.4f, want %.4f +/- %.4f", got, want, tolerance)
+	}
 }

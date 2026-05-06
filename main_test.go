@@ -421,6 +421,37 @@ func TestHandleListGRPCEndpoints_InvalidRootPathReturnsToolError(t *testing.T) {
 	}
 }
 
+func TestHandleComputeComplexityMetrics_HalsteadMaintainabilityInputs(t *testing.T) {
+	dir := createMainTestModule(t, "handlercomplexityhalstead", map[string]string{
+		"quality.go": "package quality\n\nfunc simple() int {\n\treturn 1\n}\n\nfunc dense(a, b, c, d int) int {\n\tresult := ((a + b) * (c - d)) / (a + 1)\n\tif result > 10 {\n\t\treturn result\n\t}\n\treturn result + b\n}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleComputeComplexityMetrics(context.Background(), nil, ComplexityMetricsInput{
+		RootPath:                dir,
+		MinHalsteadVolume:       10,
+		MaxMaintainabilityIndex: 100,
+		SortBy:                  "maintainability",
+		IncludePackages:         true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.Total != 1 {
+		t.Fatalf("expected one filtered complexity result, got %#v", result)
+	}
+	function := result.Functions[0]
+	if function.Name != "dense" || function.HalsteadVolume <= 10 || function.MaintainabilityIndex <= 0 {
+		t.Fatalf("unexpected Halstead complexity result: %+v", function)
+	}
+	if len(result.Packages) != 1 || result.Packages[0].MaxHalsteadFunction == "" {
+		t.Fatalf("expected package Halstead aggregate, got %+v", result.Packages)
+	}
+}
+
 func TestHandleCacheStatusAndClearCache(t *testing.T) {
 	dir := createMainTestModule(t, "handlercache", map[string]string{
 		"main.go": "package main\n\nfunc Root() {}\n",

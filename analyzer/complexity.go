@@ -11,12 +11,16 @@ import (
 )
 
 const (
-	complexitySortCognitive  = "cognitive"
-	complexitySortCyclomatic = "cyclomatic"
-	complexitySortLines      = "lines"
-	complexitySortNesting    = "nesting"
-	complexitySortName       = "name"
-	complexitySortPackage    = "package"
+	complexitySortCognitive          = "cognitive"
+	complexitySortCyclomatic         = "cyclomatic"
+	complexitySortLines              = "lines"
+	complexitySortNesting            = "nesting"
+	complexitySortName               = "name"
+	complexitySortPackage            = "package"
+	complexitySortHalsteadVolume     = "halstead_volume"
+	complexitySortHalsteadDifficulty = "halstead_difficulty"
+	complexitySortHalsteadEffort     = "halstead_effort"
+	complexitySortMaintainability    = "maintainability"
 )
 
 // FunctionComplexity is the per-function complexity record cached during load.
@@ -33,6 +37,17 @@ type FunctionComplexity struct {
 	Cognitive  int    `json:"cognitive"`
 	BodyLines  int    `json:"body_lines"`
 	MaxNesting int    `json:"max_nesting"`
+
+	HalsteadDistinctOperators int     `json:"halstead_distinct_operators"`
+	HalsteadDistinctOperands  int     `json:"halstead_distinct_operands"`
+	HalsteadTotalOperators    int     `json:"halstead_total_operators"`
+	HalsteadTotalOperands     int     `json:"halstead_total_operands"`
+	HalsteadVocabulary        int     `json:"halstead_vocabulary"`
+	HalsteadLength            int     `json:"halstead_length"`
+	HalsteadVolume            float64 `json:"halstead_volume"`
+	HalsteadDifficulty        float64 `json:"halstead_difficulty"`
+	HalsteadEffort            float64 `json:"halstead_effort"`
+	MaintainabilityIndex      float64 `json:"maintainability_index"`
 }
 
 // PackageComplexity aggregates function complexity by package.
@@ -46,18 +61,28 @@ type PackageComplexity struct {
 	MaxCyclomatic     int     `json:"max_cyclomatic"`
 	MaxCognitive      int     `json:"max_cognitive"`
 	MaxFunction       string  `json:"max_function,omitempty"`
+
+	TotalHalsteadVolume         float64 `json:"total_halstead_volume"`
+	AverageHalsteadVolume       float64 `json:"average_halstead_volume"`
+	MaxHalsteadVolume           float64 `json:"max_halstead_volume"`
+	MaxHalsteadFunction         string  `json:"max_halstead_function,omitempty"`
+	AverageMaintainabilityIndex float64 `json:"average_maintainability_index"`
+	MinMaintainabilityIndex     float64 `json:"min_maintainability_index"`
+	MinMaintainabilityFunction  string  `json:"min_maintainability_function,omitempty"`
 }
 
 // ComplexityResult is returned by ComputeComplexityMetrics.
 type ComplexityResult struct {
-	Functions       []FunctionComplexity `json:"functions"`
-	Packages        []PackageComplexity  `json:"packages,omitempty"`
-	Total           int                  `json:"total"`
-	MinCyclomatic   int                  `json:"min_cyclomatic,omitempty"`
-	MinCognitive    int                  `json:"min_cognitive,omitempty"`
-	SortBy          string               `json:"sort_by"`
-	IncludePackages bool                 `json:"include_packages"`
-	Notes           []string             `json:"notes,omitempty"`
+	Functions               []FunctionComplexity `json:"functions"`
+	Packages                []PackageComplexity  `json:"packages,omitempty"`
+	Total                   int                  `json:"total"`
+	MinCyclomatic           int                  `json:"min_cyclomatic,omitempty"`
+	MinCognitive            int                  `json:"min_cognitive,omitempty"`
+	MinHalsteadVolume       float64              `json:"min_halstead_volume,omitempty"`
+	MaxMaintainabilityIndex float64              `json:"max_maintainability_index,omitempty"`
+	SortBy                  string               `json:"sort_by"`
+	IncludePackages         bool                 `json:"include_packages"`
+	Notes                   []string             `json:"notes,omitempty"`
 
 	Offset              int    `json:"offset,omitempty"`
 	Limit               int    `json:"limit,omitempty"`
@@ -71,10 +96,12 @@ type ComplexityResult struct {
 
 // ComplexityOptions tunes complexity filtering and sorting.
 type ComplexityOptions struct {
-	MinCyclomatic   int
-	MinCognitive    int
-	SortBy          string
-	IncludePackages bool
+	MinCyclomatic           int
+	MinCognitive            int
+	MinHalsteadVolume       float64
+	MaxMaintainabilityIndex float64
+	SortBy                  string
+	IncludePackages         bool
 }
 
 // extractComplexityFromSyntax walks package syntax and emits one complexity
@@ -116,19 +143,31 @@ func buildFunctionComplexity(pkg *packages.Package, fd *ast.FuncDecl) *FunctionC
 	qualified += fd.Name.Name
 
 	cyclomatic, cognitive, maxNesting := analyzeFuncComplexity(fd)
+	halstead := analyzeFuncHalstead(fd)
+	bodyLines := bodyLineSpan(pkg.Fset, fd.Body)
 
 	return &FunctionComplexity{
-		Function:   qualified,
-		Package:    pkg.PkgPath,
-		Receiver:   receiver,
-		Name:       fd.Name.Name,
-		File:       pos.Filename,
-		Line:       pos.Line,
-		Anchor:     contextAnchor(pos.Filename, pos.Line, fd.Name.Name),
-		Cyclomatic: cyclomatic,
-		Cognitive:  cognitive,
-		BodyLines:  bodyLineSpan(pkg.Fset, fd.Body),
-		MaxNesting: maxNesting,
+		Function:                  qualified,
+		Package:                   pkg.PkgPath,
+		Receiver:                  receiver,
+		Name:                      fd.Name.Name,
+		File:                      pos.Filename,
+		Line:                      pos.Line,
+		Anchor:                    contextAnchor(pos.Filename, pos.Line, fd.Name.Name),
+		Cyclomatic:                cyclomatic,
+		Cognitive:                 cognitive,
+		BodyLines:                 bodyLines,
+		MaxNesting:                maxNesting,
+		HalsteadDistinctOperators: halstead.DistinctOperators,
+		HalsteadDistinctOperands:  halstead.DistinctOperands,
+		HalsteadTotalOperators:    halstead.TotalOperators,
+		HalsteadTotalOperands:     halstead.TotalOperands,
+		HalsteadVocabulary:        halstead.Vocabulary,
+		HalsteadLength:            halstead.Length,
+		HalsteadVolume:            halstead.Volume,
+		HalsteadDifficulty:        halstead.Difficulty,
+		HalsteadEffort:            halstead.Effort,
+		MaintainabilityIndex:      maintainabilityIndex(halstead.Volume, cyclomatic, bodyLines),
 	}
 }
 
@@ -404,15 +443,18 @@ func ComputeComplexityMetricsWithOptions(ws *Workspace, dir, pattern string, cOp
 	sortComplexityMetrics(functions, cOpts.SortBy)
 
 	result := &ComplexityResult{
-		Functions:       functions,
-		Total:           len(functions),
-		MinCyclomatic:   cOpts.MinCyclomatic,
-		MinCognitive:    cOpts.MinCognitive,
-		SortBy:          cOpts.SortBy,
-		IncludePackages: cOpts.IncludePackages,
+		Functions:               functions,
+		Total:                   len(functions),
+		MinCyclomatic:           cOpts.MinCyclomatic,
+		MinCognitive:            cOpts.MinCognitive,
+		MinHalsteadVolume:       cOpts.MinHalsteadVolume,
+		MaxMaintainabilityIndex: cOpts.MaxMaintainabilityIndex,
+		SortBy:                  cOpts.SortBy,
+		IncludePackages:         cOpts.IncludePackages,
 		Notes: []string{
 			"Use this tool before refactors, during code review, and when onboarding to identify functions that are structurally hard to reason about.",
 			"Cyclomatic complexity counts independent control-flow paths; cognitive complexity applies nesting penalties to approximate human reading cost.",
+			"Halstead metrics estimate expression/operator density; maintainability_index combines Halstead volume, cyclomatic complexity, and body lines into a 0-100 heuristic where lower values deserve earlier review.",
 			"Complexity is a refactor and test-prioritization signal, not proof of performance, security, or correctness problems.",
 			"Test files (*_test.go) are not loaded into the analysis program; test helper complexity is not reported.",
 		},
@@ -421,12 +463,11 @@ func ComputeComplexityMetricsWithOptions(ws *Workspace, dir, pattern string, cOp
 		result.Packages = aggregatePackageComplexity(prog.complexityMetrics)
 	}
 
-	result.TotalBeforeTruncate = result.Total
 	result.Offset = opts.Offset
 	result.Limit = opts.Limit
 	result.MaxItems = opts.MaxItems
 	var err2 error
-	result.Functions, _, result.Truncated, result.HasMore, result.NextCursor, err2 = streamOrWindow(result.Functions, "complexity:"+dir+"|"+pattern+"|"+cOpts.SortBy, complexityFunctionKey, opts)
+	result.Functions, result.TotalBeforeTruncate, result.Truncated, result.HasMore, result.NextCursor, err2 = streamOrWindow(result.Functions, complexityStreamFingerprint(dir, pattern, cOpts), complexityFunctionKey, opts)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -444,11 +485,17 @@ func normalizeComplexityOptions(opts ComplexityOptions) ComplexityOptions {
 	if opts.MinCognitive < 0 {
 		opts.MinCognitive = 0
 	}
+	if opts.MinHalsteadVolume < 0 {
+		opts.MinHalsteadVolume = 0
+	}
+	if opts.MaxMaintainabilityIndex < 0 {
+		opts.MaxMaintainabilityIndex = 0
+	}
 	opts.SortBy = strings.ToLower(strings.TrimSpace(opts.SortBy))
 	switch opts.SortBy {
 	case "", complexitySortCognitive:
 		opts.SortBy = complexitySortCognitive
-	case complexitySortCyclomatic, complexitySortLines, complexitySortNesting, complexitySortName, complexitySortPackage:
+	case complexitySortCyclomatic, complexitySortLines, complexitySortNesting, complexitySortName, complexitySortPackage, complexitySortHalsteadVolume, complexitySortHalsteadDifficulty, complexitySortHalsteadEffort, complexitySortMaintainability:
 		return opts
 	default:
 		opts.SortBy = complexitySortCognitive
@@ -463,6 +510,12 @@ func filterComplexityMetrics(metrics []FunctionComplexity, opts ComplexityOption
 			continue
 		}
 		if opts.MinCognitive > 0 && metric.Cognitive < opts.MinCognitive {
+			continue
+		}
+		if opts.MinHalsteadVolume > 0 && metric.HalsteadVolume < opts.MinHalsteadVolume {
+			continue
+		}
+		if opts.MaxMaintainabilityIndex > 0 && metric.MaintainabilityIndex > opts.MaxMaintainabilityIndex {
 			continue
 		}
 		out = append(out, metric)
@@ -485,6 +538,22 @@ func sortComplexityMetrics(metrics []FunctionComplexity, sortBy string) {
 		case complexitySortNesting:
 			if left.MaxNesting != right.MaxNesting {
 				return left.MaxNesting > right.MaxNesting
+			}
+		case complexitySortHalsteadVolume:
+			if left.HalsteadVolume != right.HalsteadVolume {
+				return left.HalsteadVolume > right.HalsteadVolume
+			}
+		case complexitySortHalsteadDifficulty:
+			if left.HalsteadDifficulty != right.HalsteadDifficulty {
+				return left.HalsteadDifficulty > right.HalsteadDifficulty
+			}
+		case complexitySortHalsteadEffort:
+			if left.HalsteadEffort != right.HalsteadEffort {
+				return left.HalsteadEffort > right.HalsteadEffort
+			}
+		case complexitySortMaintainability:
+			if left.MaintainabilityIndex != right.MaintainabilityIndex {
+				return left.MaintainabilityIndex < right.MaintainabilityIndex
 			}
 		case complexitySortName:
 			return left.Function < right.Function
@@ -512,14 +581,20 @@ func sortComplexityMetrics(metrics []FunctionComplexity, sortBy string) {
 
 func aggregatePackageComplexity(metrics []FunctionComplexity) []PackageComplexity {
 	type bucket struct {
-		Package         string
-		FunctionCount   int
-		TotalCyclomatic int
-		TotalCognitive  int
-		MaxCyclomatic   int
-		MaxCognitive    int
-		MaxFunctionCC   int
-		MaxFunction     string
+		Package                    string
+		FunctionCount              int
+		TotalCyclomatic            int
+		TotalCognitive             int
+		MaxCyclomatic              int
+		MaxCognitive               int
+		MaxFunctionCC              int
+		MaxFunction                string
+		TotalHalsteadVolume        float64
+		MaxHalsteadVolume          float64
+		MaxHalsteadFunction        string
+		TotalMaintainabilityIndex  float64
+		MinMaintainabilityIndex    float64
+		MinMaintainabilityFunction string
 	}
 
 	buckets := make(map[string]*bucket, 32)
@@ -532,6 +607,8 @@ func aggregatePackageComplexity(metrics []FunctionComplexity) []PackageComplexit
 		b.FunctionCount++
 		b.TotalCyclomatic += metric.Cyclomatic
 		b.TotalCognitive += metric.Cognitive
+		b.TotalHalsteadVolume += metric.HalsteadVolume
+		b.TotalMaintainabilityIndex += metric.MaintainabilityIndex
 		if metric.Cyclomatic > b.MaxCyclomatic {
 			b.MaxCyclomatic = metric.Cyclomatic
 		}
@@ -540,26 +617,45 @@ func aggregatePackageComplexity(metrics []FunctionComplexity) []PackageComplexit
 			b.MaxFunctionCC = metric.Cyclomatic
 			b.MaxFunction = metric.Function
 		}
+		if metric.HalsteadVolume > b.MaxHalsteadVolume {
+			b.MaxHalsteadVolume = metric.HalsteadVolume
+			b.MaxHalsteadFunction = metric.Function
+		}
+		if b.FunctionCount == 1 || metric.MaintainabilityIndex < b.MinMaintainabilityIndex {
+			b.MinMaintainabilityIndex = metric.MaintainabilityIndex
+			b.MinMaintainabilityFunction = metric.Function
+		}
 	}
 
 	packages := make([]PackageComplexity, 0, len(buckets))
 	for _, b := range buckets {
 		avgCyclomatic := 0.0
 		avgCognitive := 0.0
+		avgHalsteadVolume := 0.0
+		avgMaintainabilityIndex := 0.0
 		if b.FunctionCount > 0 {
 			avgCyclomatic = float64(b.TotalCyclomatic) / float64(b.FunctionCount)
 			avgCognitive = float64(b.TotalCognitive) / float64(b.FunctionCount)
+			avgHalsteadVolume = b.TotalHalsteadVolume / float64(b.FunctionCount)
+			avgMaintainabilityIndex = b.TotalMaintainabilityIndex / float64(b.FunctionCount)
 		}
 		packages = append(packages, PackageComplexity{
-			Package:           b.Package,
-			FunctionCount:     b.FunctionCount,
-			TotalCyclomatic:   b.TotalCyclomatic,
-			TotalCognitive:    b.TotalCognitive,
-			AverageCyclomatic: avgCyclomatic,
-			AverageCognitive:  avgCognitive,
-			MaxCyclomatic:     b.MaxCyclomatic,
-			MaxCognitive:      b.MaxCognitive,
-			MaxFunction:       b.MaxFunction,
+			Package:                     b.Package,
+			FunctionCount:               b.FunctionCount,
+			TotalCyclomatic:             b.TotalCyclomatic,
+			TotalCognitive:              b.TotalCognitive,
+			AverageCyclomatic:           avgCyclomatic,
+			AverageCognitive:            avgCognitive,
+			MaxCyclomatic:               b.MaxCyclomatic,
+			MaxCognitive:                b.MaxCognitive,
+			MaxFunction:                 b.MaxFunction,
+			TotalHalsteadVolume:         roundMetric(b.TotalHalsteadVolume),
+			AverageHalsteadVolume:       roundMetric(avgHalsteadVolume),
+			MaxHalsteadVolume:           b.MaxHalsteadVolume,
+			MaxHalsteadFunction:         b.MaxHalsteadFunction,
+			AverageMaintainabilityIndex: roundMetric(avgMaintainabilityIndex),
+			MinMaintainabilityIndex:     b.MinMaintainabilityIndex,
+			MinMaintainabilityFunction:  b.MinMaintainabilityFunction,
 		})
 	}
 
@@ -577,4 +673,8 @@ func aggregatePackageComplexity(metrics []FunctionComplexity) []PackageComplexit
 
 func complexityFunctionKey(f FunctionComplexity) string {
 	return f.Package + "|" + f.Function + "|" + f.File + ":" + fmt.Sprintf("%d", f.Line)
+}
+
+func complexityStreamFingerprint(dir, pattern string, opts ComplexityOptions) string {
+	return fmt.Sprintf("complexity:%s|%s|sort=%s|mincc=%d|mincog=%d|minhv=%.2f|maxmi=%.2f", dir, pattern, opts.SortBy, opts.MinCyclomatic, opts.MinCognitive, opts.MinHalsteadVolume, opts.MaxMaintainabilityIndex)
 }
