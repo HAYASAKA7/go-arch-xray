@@ -4,10 +4,16 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/HAYASAKA7/go-arch-xray/analyzer"
 )
+
+func TestMain(m *testing.M) {
+	os.Setenv("GO_ARCH_XRAY_USER_CONFIG", "off")
+	os.Exit(m.Run())
+}
 
 func TestHandlePackageDependencies_ReturnsStructuredDependencies(t *testing.T) {
 	dir := createMainTestModule(t, "handlerdeps", map[string]string{
@@ -286,6 +292,55 @@ func TestHandleCheckArchitectureBoundaries_NoRulesReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleCheckArchitectureBoundaries_UsesConfiguredRules(t *testing.T) {
+	dir := createMainTestModule(t, "handlerboundsconfig", map[string]string{
+		"app/app.go": "package app\n\nimport \"handlerboundsconfig/db\"\n\nfunc Run() string { return db.Query() }\n",
+		"db/db.go":   "package db\n\nfunc Query() string { return \"\" }\n",
+	})
+	writeMainTestFile(t, dir, ".go-arch-xray.yml", "version: 1\npackage_patterns:\n  - ./...\nboundaries:\n  - type: forbid\n    from: handlerboundsconfig/app\n    to: handlerboundsconfig/db\n")
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleCheckArchitectureBoundaries(context.Background(), nil, CheckArchitectureBoundariesInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.ViolationCount == 0 {
+		t.Fatalf("expected configured boundary violation, got %#v", result)
+	}
+}
+
+func TestHandleCheckArchitectureBoundaries_ExplicitRulesOverrideConfig(t *testing.T) {
+	dir := createMainTestModule(t, "handlerboundsoverride", map[string]string{
+		"app/app.go": "package app\n\nimport \"handlerboundsoverride/db\"\n\nfunc Run() string { return db.Query() }\n",
+		"db/db.go":   "package db\n\nfunc Query() string { return \"\" }\n",
+	})
+	writeMainTestFile(t, dir, ".go-arch-xray.yml", "version: 1\npackage_patterns:\n  - ./...\nboundaries:\n  - type: forbid\n    from: handlerboundsoverride/app\n    to: handlerboundsoverride/db\n")
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleCheckArchitectureBoundaries(context.Background(), nil, CheckArchitectureBoundariesInput{
+		RootPath: dir,
+		Rules: []analyzer.BoundaryRule{{
+			Type: analyzer.RuleForbid,
+			From: "handlerboundsoverride/db",
+			To:   "handlerboundsoverride/app",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.ViolationCount != 0 {
+		t.Fatalf("expected explicit rules to override config rules, got %#v", result)
+	}
+}
+
 func TestHandleListEntrypoints_DetectsMainFunction(t *testing.T) {
 	dir := createMainTestModule(t, "handlerentrypoints", map[string]string{
 		"main.go": "package main\n\nfunc main() {}\n",
@@ -449,6 +504,30 @@ func TestHandleComputeComplexityMetrics_HalsteadMaintainabilityInputs(t *testing
 	}
 	if len(result.Packages) != 1 || result.Packages[0].MaxHalsteadFunction == "" {
 		t.Fatalf("expected package Halstead aggregate, got %+v", result.Packages)
+	}
+}
+
+func TestHandleComputeComplexityMetrics_UsesConfiguredDefaults(t *testing.T) {
+	dir := createMainTestModule(t, "handlercomplexityconfig", map[string]string{
+		"quality.go": "package quality\n\nfunc simple() int {\n\treturn 1\n}\n\nfunc dense(a, b, c, d int) int {\n\tresult := ((a + b) * (c - d)) / (a + 1)\n\tif result > 10 {\n\t\treturn result\n\t}\n\treturn result + b\n}\n",
+	})
+	writeMainTestFile(t, dir, ".go-arch-xray.yml", "version: 1\npackage_patterns:\n  - ./...\ncomplexity:\n  min_halstead_volume: 10\n  sort_by: maintainability\n")
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleComputeComplexityMetrics(context.Background(), nil, ComplexityMetricsInput{
+		RootPath: dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.Total != 1 || result.Functions[0].Name != "dense" {
+		t.Fatalf("expected configured complexity filter to keep dense only, got %#v", result)
+	}
+	if result.SortBy != "maintainability" || result.MinHalsteadVolume != 10 {
+		t.Fatalf("expected configured complexity defaults, got %#v", result)
 	}
 }
 
@@ -620,6 +699,46 @@ func TestHandleClearCache_WithPattern(t *testing.T) {
 	}
 }
 
+func TestHandleInspectSuggestAndInitWorkspaceConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeMainTestFile(t, dir, "go.work", "go 1.23\n\nuse (\n\t./services/api\n\t./libs/shared\n)\n")
+	writeMainTestFile(t, dir, "services/api/go.mod", "module example.com/api\n\ngo 1.23\n")
+	writeMainTestFile(t, dir, "libs/shared/go.mod", "module example.com/shared\n\ngo 1.23\n")
+
+	_, inspection, err := handleInspectWorkspaceConfig(context.Background(), nil, InspectWorkspaceConfigInput{RootPath: dir})
+	if err != nil {
+		t.Fatalf("inspect config: %v", err)
+	}
+	if inspection == nil || inspection.ConfigExists || len(inspection.EffectiveConfig.Modules) != 2 {
+		t.Fatalf("unexpected inspection result: %#v", inspection)
+	}
+	if !strings.Contains(inspection.RecommendedNextStep, "init_workspace_config") {
+		t.Fatalf("expected inspection to recommend config initialization option, got %q", inspection.RecommendedNextStep)
+	}
+
+	_, suggestion, err := handleSuggestWorkspaceConfig(context.Background(), nil, SuggestWorkspaceConfigInput{RootPath: dir})
+	if err != nil {
+		t.Fatalf("suggest config: %v", err)
+	}
+	if suggestion == nil || !strings.Contains(suggestion.YAML, "./services/api/...") {
+		t.Fatalf("expected go.work module pattern in suggestion, got %#v", suggestion)
+	}
+	if !strings.Contains(suggestion.RecommendedNextStep, "init_workspace_config") {
+		t.Fatalf("expected suggestion to recommend explicit init flow, got %q", suggestion.RecommendedNextStep)
+	}
+
+	_, initResult, err := handleInitWorkspaceConfig(context.Background(), nil, InitWorkspaceConfigInput{RootPath: dir})
+	if err != nil {
+		t.Fatalf("init config: %v", err)
+	}
+	if initResult == nil || !initResult.Created {
+		t.Fatalf("expected created config result, got %#v", initResult)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, ".go-arch-xray.yml")); statErr != nil {
+		t.Fatalf("expected config file to be written: %v", statErr)
+	}
+}
+
 func mainHasDependency(r *analyzer.DependencyResult, from, to string) bool {
 	for _, node := range r.Packages {
 		if node.Package != from {
@@ -690,4 +809,15 @@ func createMainTestModule(t testing.TB, name string, files map[string]string) st
 		}
 	}
 	return dir
+}
+
+func writeMainTestFile(t testing.TB, root, name, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

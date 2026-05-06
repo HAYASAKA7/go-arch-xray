@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.9] - 2026-05-06
+
+### Added
+
+- Added repo-aware configuration support via `.go-arch-xray.yml` with
+  defaults for package patterns, cache capacity, output controls,
+  architecture boundary rules, complexity filters, and lifecycle options.
+- Added `inspect_workspace_config`, `suggest_workspace_config`, and
+  `init_workspace_config` MCP tools so AI clients can discover current
+  config, propose a safe config, or create one only when explicitly asked.
+- Added automatic `go.work` and `go.mod` discovery for config suggestions.
+  Multi-module workspaces expand to root-relative module package patterns
+  such as `./services/api/...` and `./libs/shared/...`.
+- Existing analysis tools now apply effective config defaults when callers
+  leave fields blank, while explicit tool inputs still take precedence.
+- Added optional user-local config support through the OS config directory,
+  with repo config overriding user defaults.
+
 ## [0.5.8] - 2026-05-06
 
 ### Added

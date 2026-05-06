@@ -38,9 +38,51 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
 - `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
+- `inspect_workspace_config`: Shows the repo config path, user-local config path, auto-detected `go.work`/`go.mod` defaults, and the effective config used by tools.
+- `suggest_workspace_config`: Returns a proposed `.go-arch-xray.yml` from `go.work`/`go.mod` discovery without writing files.
+- `init_workspace_config`: Writes `.go-arch-xray.yml` in the repo root from discovered defaults. It does not overwrite an existing file unless `overwrite: true` is passed.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
 - `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
 - `list_grpc_endpoints`: Discovers generated grpc-go `ServiceDesc` methods and `Register<Service>Server` call sites in loaded Go packages. Returns service, method, full method path, RPC type (`unary`, `client_stream`, `server_stream`, `bidi_stream`), handler, proto metadata, registration status, implementations, and source locations. Include generated `*.pb.go` or `*_grpc.pb.go` packages in the package pattern. Pagination and streaming cover endpoint rows and registration rows together; `total` and `total_registrations` report each full unpaged count.
+
+## Configuration
+
+Go Architecture X-Ray can load repo defaults from `.go-arch-xray.yml` in the active project root. Explicit tool inputs always override config values. If no repo config exists, tools keep today's built-in defaults, with `go.work`/`go.mod` discovery used to suggest safer package patterns for multi-module repos.
+
+Recommended workflow for AI clients:
+
+1. Call `inspect_workspace_config` when analysis scope is unclear.
+2. Call `suggest_workspace_config` to show a proposed config without changing files.
+3. Call `init_workspace_config` only when the user explicitly asks to create the repo config.
+
+Example `.go-arch-xray.yml`:
+
+```yaml
+version: 1
+workspace:
+  mode: go_work
+  file: go.work
+package_patterns:
+  - ./services/api/...
+  - ./libs/shared/...
+cache_capacity: 2
+output:
+  max_items: 500
+boundaries:
+  - type: forbid
+    from: example.com/app/internal/domain
+    to: example.com/app/internal/infrastructure
+complexity:
+  min_cognitive: 15
+  min_halstead_volume: 80
+  max_maintainability_index: 55
+  sort_by: maintainability
+lifecycle:
+  dedupe_mode: function_kind_field
+  max_hops: 1000
+```
+
+User-local defaults are also supported at the OS config path, for example `%APPDATA%\go-arch-xray\config.yml` on Windows or `~/.config/go-arch-xray/config.yml` on Linux. Repo config should hold shared team policy; user-local config is best for personal output preferences.
 
 ## Install From GitHub Releases
 
