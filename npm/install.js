@@ -128,8 +128,22 @@ async function main() {
   const target = detectTarget();
   const { binDir, binPath } = binaryPath(target);
 
-  if (fs.existsSync(binPath)) {
-    log(`binary already present at ${binPath}; skipping download.`);
+  // Check for version mismatch on upgrades
+  const versionFilePath = path.join(binDir, "version.txt");
+  let needsDownload = true;
+  if (fs.existsSync(binPath) && fs.existsSync(versionFilePath)) {
+    const installedVersion = fs.readFileSync(versionFilePath, "utf8").trim();
+    if (installedVersion === VERSION) {
+      log(`binary already present at ${binPath}; skipping download.`);
+      needsDownload = false;
+    } else {
+      log(`upgrading from ${installedVersion} to ${VERSION}`);
+    }
+  } else if (fs.existsSync(binPath)) {
+    log(`binary exists but no version file; re-downloading ${VERSION}`);
+  }
+
+  if (!needsDownload) {
     return;
   }
 
@@ -163,6 +177,8 @@ async function main() {
     if (process.platform !== "win32") {
       fs.chmodSync(binPath, 0o755);
     }
+    // Write version file for upgrade detection
+    fs.writeFileSync(versionFilePath, VERSION, "utf8");
     log(`installed ${binPath}`);
   } catch (err) {
     fail(

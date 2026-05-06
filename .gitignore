@@ -3,6 +3,7 @@
 .vscode/settings.json
 
 # Build outputs
+dist/
 go-arch-xray.exe
 go-arch-xray
 *.exe
@@ -32,6 +33,8 @@ node_modules/
 npm/node_modules/
 npm/bin/go-arch-xray
 npm/bin/go-arch-xray.exe
+npm/bin/version.txt
+npm/package-lock.json
 npm-debug.log*
 *.tgz
 .npmrc

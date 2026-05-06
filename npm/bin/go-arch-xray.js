@@ -1,46 +1,77 @@
 #!/usr/bin/env node
-// Thin launcher: locates the platform-specific go-arch-xray binary downloaded
-// by install.js (or pointed to by GO_ARCH_XRAY_BIN) and execs it with the
-// caller's argv, inheriting stdio and exit code.
-
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
 const { spawnSync } = require("child_process");
+const path = require("path");
+const os = require("os");
+const fs = require("fs");
 
-const REPO = "HAYASAKA7/go-arch-xray";
+// Resolve package.json from the package root (not bin directory)
+const pkgPath = path.join(__dirname, "..", "package.json");
+const pkg = require(pkgPath);
+const VERSION = pkg.version;
+const TAG = `v${VERSION}`;
 
-function resolveBinary() {
+const PLATFORM_MAP = {
+  "win32-x64": { goos: "windows", goarch: "amd64", ext: ".exe" },
+  "win32-arm64": { goos: "windows", goarch: "arm64", ext: ".exe" },
+  "darwin-x64": { goos: "darwin", goarch: "amd64", ext: "" },
+  "darwin-arm64": { goos: "darwin", goarch: "arm64", ext: "" },
+  "linux-x64": { goos: "linux", goarch: "amd64", ext: "" },
+  "linux-arm64": { goos: "linux", goarch: "arm64", ext: "" },
+};
+
+function log(msg) {
+  process.stderr.write(`[go-arch-xray] ${msg}\n`);
+}
+
+function detectTarget() {
+  const key = `${process.platform}-${process.arch}`;
+  const target = PLATFORM_MAP[key];
+  if (!target) {
+    throw new Error(
+      `Unsupported platform ${key}. Supported: ${Object.keys(PLATFORM_MAP).join(", ")}.\n` +
+        `Build from source: https://github.com/HAYASAKA7/go-arch-xray#build-from-source`
+    );
+  }
+  return target;
+}
+
+function getBinaryPath() {
+  // Check for GO_ARCH_XRAY_BIN override first
   if (process.env.GO_ARCH_XRAY_BIN) {
     return process.env.GO_ARCH_XRAY_BIN;
   }
-  const ext = process.platform === "win32" ? ".exe" : "";
-  return path.join(__dirname, `go-arch-xray${ext}`);
+
+  const target = detectTarget();
+  const binaryName = `go-arch-xray-${target.goos}-${target.goarch}${target.ext}`;
+  const binDir = path.join(__dirname, "bin");
+  const binPath = path.join(binDir, binaryName);
+
+  if (!fs.existsSync(binPath)) {
+    throw new Error(
+      `Binary not found at ${binPath}.\n` +
+        `Run 'npm rebuild @hayasaka7/go-arch-xray' to re-download, or set GO_ARCH_XRAY_BIN to an existing binary path.`
+    );
+  }
+
+  return binPath;
 }
 
-const binPath = resolveBinary();
+function main() {
+  const binPath = getBinaryPath();
+  const args = process.argv.slice(2);
 
-if (!fs.existsSync(binPath)) {
-  process.stderr.write(
-    `[go-arch-xray] binary not found at ${binPath}\n` +
-      `The npm postinstall step did not run or failed.\n` +
-      `Try one of:\n` +
-      `  npm rebuild @hayasaka7/go-arch-xray\n` +
-      `  download the asset manually from https://github.com/${REPO}/releases and set GO_ARCH_XRAY_BIN\n`
-  );
-  process.exit(1);
+  const result = spawnSync(binPath, args, {
+    stdio: "inherit",
+  });
+
+  if (result.error) {
+    log(`Failed to launch: ${result.error.message}`);
+    process.exit(1);
+  }
+
+  process.exit(result.status ?? 0);
 }
 
-const result = spawnSync(binPath, process.argv.slice(2), { stdio: "inherit" });
-
-if (result.error) {
-  process.stderr.write(`[go-arch-xray] failed to spawn binary: ${result.error.message}\n`);
-  process.exit(1);
-}
-
-if (result.signal) {
-  process.kill(process.pid, result.signal);
-}
-
-process.exit(result.status ?? 1);
+main();

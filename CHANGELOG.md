@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.10] - 2026-05-06
+
+### Added
+
+- CI workflow with gofmt, go vet, govulncheck, staticcheck, tests, and race detector.
+- Dependabot configuration for automated dependency updates (Go modules, npm, GitHub Actions).
+- Checksum generation for release artifacts (SHA-256 and SHA-512).
+- npm wrapper launcher script (`bin/go-arch-xray.js`) for package distribution.
+- Version tracking in npm installer to support proper upgrades between versions.
+- Markdown lint configuration (`.markdownlint.jsonc`) for CHANGELOG validation.
+- Limitations section in README documenting CHA over-approximation, concurrency heuristics, SSA scope, and dead code detection caveats.
+- Troubleshooting section in README covering empty results, stale cache, and large repositories.
+
+### Changed
+
+- Fixed CHANGELOG Markdown formatting (removed duplicate blank lines).
+
 ## [0.5.9] - 2026-05-06
 
 ### Added
@@ -183,8 +200,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary diagrams highlight violating edges (dashed) and source packages
   ("violation" class) for visual emphasis. Default behavior is unchanged
   when `export` is omitted.
-
-
 
 ## [0.5.1] - 2026-04-30
 

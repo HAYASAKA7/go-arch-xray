@@ -91,9 +91,36 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
 
+  checksums:
+    name: Generate Checksums
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.zip *.tar.gz > checksums.txt
+          sha512sum *.zip *.tar.gz > checksums-sha512.txt
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: |
+            dist/checksums.txt
+            dist/checksums-sha512.txt
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs:
+      - build
+      - checksums
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -108,6 +135,8 @@ jobs:
           files: |
             dist/*.zip
             dist/*.tar.gz
+            dist/checksums.txt
+            dist/checksums-sha512.txt
           generate_release_notes: true
 
   npm-publish:

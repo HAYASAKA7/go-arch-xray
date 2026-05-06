@@ -363,6 +363,70 @@ Example `analyze_call_hierarchy` input:
 }
 ```
 
+## Limitations
+
+### Call Graph Precision
+
+Call hierarchy and reachability analysis uses Class Hierarchy Analysis (CHA), which is an over-approximation:
+
+- **Interface calls:** CHA conservatively assumes a concrete method can be called on any struct that implements the interface, even if runtime type checking would prevent the call.
+- **Reflection:** Calls made via `reflect.Value.Call`, `reflect.Call`, or generated code (like protocol buffer stubs) are invisible to static analysis.
+- **Plugins / CGO:** Dynamically loaded code, `//go:linkname`, and CGO interop are not tracked.
+- **Anonymous functions:** Captured variables and closure behavior may not be fully represented.
+
+### Concurrency Risk Heuristics
+
+The `detect_concurrency_risks` tool uses static heuristics:
+
+- **False positives:** The analysis flags field mutations inside goroutines that lack visible mutex or `sync/atomic` protection. Some code may use higher-level synchronization (channels, atomic-free patterns, or external guarantees) that the analysis cannot see.
+- **False negatives:** The analysis only checks for explicit `sync.Mutex` / `sync.RWMutex` / `sync/atomic` patterns. Other synchronization primitives (channels, `sync.Map`, external locks) are not recognized.
+- Use the risk results as a signal for manual review, not as proof of a race condition.
+
+### SSA Scope
+
+The Static Single Assignment (SSA) program is built only for explicitly loaded root packages:
+
+- Transitive dependencies are loaded as type-only entries, not as full SSA programs.
+- Functions in dependency packages (e.g., `net/http`) are not analyzed for internal structure—only for call-graph connectivity.
+- For large monorepos, narrow your `package_patterns` to the modules you actually want to inspect rather than `./...`.
+
+### Dead Code Detection
+
+The `find_dead_code` tool reports unexported symbols with zero inbound callers or unreachable entrypoint chains:
+
+- **Reflection:** Functions called via `reflect` are invisible and may be incorrectly flagged as dead.
+- **Plugin patterns:** Code loaded at runtime or called through plugin interfaces will appear unreferenced.
+- **Test-only usage:** If a function is only called from `*_test.go` files (which are not loaded into the analysis program), it may be flagged as dead.
+
+Verify before deleting any symbols reported by `find_dead_code`.
+
+## Troubleshooting
+
+### Empty Results
+
+- **No packages found:** Your `package_pattern` or `package_patterns` may not match any Go packages. Try `./...` to scan from the repository root.
+- **Multi-module workspace:** If you have a `go.work` file, use root-relative module patterns like `./services/api/...` and `./libs/shared/...` instead of `./...`. Call `inspect_workspace_config` or `suggest_workspace_config` for auto-detected patterns.
+- **Generated code excluded:** For gRPC analysis, include generated `*.pb.go` or `*_grpc.pb.go` packages in your package pattern.
+
+### Stale Cache
+
+- If you've edited code and want fresh analysis, call `reload_workspace` with the same `root_path` and `package_pattern` you used before.
+- The cache key combines `root_path` and `package_patterns`. If you change either parameter, the server will load fresh code.
+- Call `clear_cache` with `all: true` to evict all cached programs if you're unsure of the cache state.
+
+### Large Repositories
+
+- High memory usage can occur on very large monorepos. Narrow your `package_patterns` to specific modules or subtrees.
+- Use `package_patterns` with multiple specific patterns instead of broad `./...` patterns.
+- Reduce `cache_capacity` (default 2) if memory is constrained.
+- Use `limit`/`offset` or `chunk_size`+`cursor` to paginate results instead of requesting all items at once.
+
+### Slow Analysis
+
+- First calls on a large repository will be slower as the workspace loads (go/packages → SSA). Subsequent calls use cached results.
+- For repeated queries, use streaming (`chunk_size`+`cursor`) instead of repeated full queries with large `limit` values.
+- Use `max_items` to cap the worst-case response size for large codebases.
+
 ## Notes
 
 Diagnostic logs are written to stderr so stdout remains reserved for MCP protocol traffic. Business errors are returned as MCP tool errors with `isError: true`, allowing clients to correct inputs without treating the server transport as failed.
