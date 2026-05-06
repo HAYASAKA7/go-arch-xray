@@ -117,6 +117,27 @@ func BenchmarkHandleListHTTPRoutes(b *testing.B) {
 	}
 }
 
+// BenchmarkHandleListGRPCEndpoints measures cached gRPC endpoint query latency.
+func BenchmarkHandleListGRPCEndpoints(b *testing.B) {
+	dir := createMainTestModule(b, "benchgrpc", map[string]string{
+		"grpc/grpc.go":     "package grpc\n\ntype ServiceDesc struct { ServiceName string; Methods []MethodDesc }\ntype MethodDesc struct { MethodName string; Handler any }\n",
+		"pb/greeter.pb.go": "package pb\n\nimport \"benchgrpc/grpc\"\n\nfunc h() {}\n\nvar Greeter_ServiceDesc = grpc.ServiceDesc{\n\tServiceName: \"bench.Greeter\",\n\tMethods: []grpc.MethodDesc{{MethodName: \"Ping\", Handler: h}},\n}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, _, err := handleListGRPCEndpoints(context.Background(), nil, ListGRPCEndpointsInput{RootPath: dir}); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := handleListGRPCEndpoints(context.Background(), nil, ListGRPCEndpointsInput{RootPath: dir})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkHandleComputeComplexityMetrics measures cached complexity query latency.
 func BenchmarkHandleComputeComplexityMetrics(b *testing.B) {
 	dir := createMainTestModule(b, "benchcomplexity", map[string]string{

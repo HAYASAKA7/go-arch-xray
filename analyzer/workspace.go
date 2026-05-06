@@ -47,6 +47,11 @@ type LoadedProgram struct {
 	// full source re-parsing on every ListHTTPRoutes call.
 	httpRoutes []HTTPRoute
 
+	// grpcEndpoints and grpcRegistrations cache generated grpc-go service
+	// descriptors and registration call sites extracted during load.
+	grpcEndpoints     []GRPCEndpoint
+	grpcRegistrations []GRPCRegistration
+
 	// methodFingerprints caches per-function/method body hashes captured
 	// during load (before pkg.Syntax is cleared). Used by
 	// FindDuplicateMethods to detect copy-pasted implementations without
@@ -344,6 +349,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
 	}
 	httpRoutesCache := extractRoutesFromSyntax(pkgs)
+	grpcCache := extractGRPCFromSyntax(pkgs)
 	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
 	complexityMetricsCache := extractComplexityFromSyntax(pkgs)
 
@@ -403,6 +409,8 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		Patterns:           patterns,
 		importLocs:         importLocsCache,
 		httpRoutes:         httpRoutesCache,
+		grpcEndpoints:      grpcCache.endpoints,
+		grpcRegistrations:  grpcCache.registrations,
 		methodFingerprints: methodFingerprintsCache,
 		complexityMetrics:  complexityMetricsCache,
 	}, nil

@@ -379,6 +379,48 @@ func TestHandleListHTTPRoutes_TotalMatchesSlice(t *testing.T) {
 	}
 }
 
+func TestHandleListGRPCEndpoints_DetectsGeneratedDescriptor(t *testing.T) {
+	dir := createMainTestModule(t, "handlergrpc", map[string]string{
+		"grpc/grpc.go":     "package grpc\n\ntype ServiceDesc struct { ServiceName string; Methods []MethodDesc; Metadata any }\ntype MethodDesc struct { MethodName string; Handler any }\n",
+		"pb/greeter.pb.go": "package pb\n\nimport \"handlergrpc/grpc\"\n\nfunc h() {}\n\nvar Greeter_ServiceDesc = grpc.ServiceDesc{\n\tServiceName: \"handler.Greeter\",\n\tMethods: []grpc.MethodDesc{{MethodName: \"Ping\", Handler: h}},\n\tMetadata: \"handler.proto\",\n}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleListGRPCEndpoints(context.Background(), nil, ListGRPCEndpointsInput{RootPath: dir})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success, got tool result: %#v", toolResult)
+	}
+	if result == nil || result.Total != 1 {
+		t.Fatalf("expected one gRPC endpoint, got %#v", result)
+	}
+	endpoint := result.Endpoints[0]
+	if endpoint.FullMethod != "/handler.Greeter/Ping" || endpoint.RPCType != analyzer.GRPCRPCUnary {
+		t.Fatalf("unexpected endpoint: %+v", endpoint)
+	}
+	if endpoint.Handler != "h" || endpoint.ServiceDesc != "Greeter_ServiceDesc" || endpoint.ProtoFile != "handler.proto" {
+		t.Fatalf("unexpected endpoint metadata: %+v", endpoint)
+	}
+}
+
+func TestHandleListGRPCEndpoints_InvalidRootPathReturnsToolError(t *testing.T) {
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleListGRPCEndpoints(context.Background(), nil, ListGRPCEndpointsInput{
+		RootPath: "/path/to/nonexistent/dir/that/should/not/exist",
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected no structured result, got %#v", result)
+	}
+	if toolResult == nil || !toolResult.IsError {
+		t.Fatalf("expected MCP tool error result for invalid root path, got %#v", toolResult)
+	}
+}
+
 func TestHandleCacheStatusAndClearCache(t *testing.T) {
 	dir := createMainTestModule(t, "handlercache", map[string]string{
 		"main.go": "package main\n\nfunc Root() {}\n",

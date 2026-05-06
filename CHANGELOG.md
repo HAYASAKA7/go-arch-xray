@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-05-06
+
+### Added
+
+- New `list_grpc_endpoints` MCP tool: discovers generated grpc-go
+  `ServiceDesc` methods and `Register<Service>Server` call sites in
+  loaded Go packages. Results include service name, short service name,
+  method, full method path, RPC type (`unary`, `client_stream`,
+  `server_stream`, `bidi_stream`), handler, handler type, proto
+  metadata, registration status, implementation expressions, and source
+  locations.
+- Cached gRPC endpoint extraction during workspace load, before ASTs are
+  cleared, so repeated `list_grpc_endpoints` calls do not re-parse
+  source files.
+- Server `Instructions` guidance for AI clients: use
+  `list_grpc_endpoints` for gRPC APIs, protobuf service methods,
+  generated grpc-go registrations, and service implementation mapping;
+  retry with package patterns that include generated `*.pb.go` or
+  `*_grpc.pb.go` packages when results are empty.
+- Cursor streaming for `list_grpc_endpoints` pages endpoint rows and
+  registration call-site rows together while still reporting separate
+  `total` and `total_registrations` counts.
+- Tests for unary, server-streaming, bidirectional-streaming, legacy
+  lowercase descriptor names, registration matching, and cursor
+  streaming, plus cached handler benchmark coverage.
+
 ## [0.5.6] - 2026-05-06
 
 ### Added

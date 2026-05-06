@@ -40,6 +40,7 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
 - `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
+- `list_grpc_endpoints`: Discovers generated grpc-go `ServiceDesc` methods and `Register<Service>Server` call sites in loaded Go packages. Returns service, method, full method path, RPC type (`unary`, `client_stream`, `server_stream`, `bidi_stream`), handler, proto metadata, registration status, implementations, and source locations. Include generated `*.pb.go` or `*_grpc.pb.go` packages in the package pattern. Pagination and streaming cover endpoint rows and registration rows together; `total` and `total_registrations` report each full unpaged count.
 
 ## Install From GitHub Releases
 
@@ -214,8 +215,8 @@ High-volume tools also accept:
 For slice-returning tools (`get_interface_topology`, `get_package_dependencies`,
 `find_callers`, `find_reverse_dependencies`, `check_architecture_boundaries`,
 `list_entrypoints`, `list_http_routes`, `analyze_call_hierarchy`,
-`trace_struct_lifecycle`, `find_dead_code`, `find_duplicate_methods`,
-`compute_complexity_metrics`):
+`trace_struct_lifecycle`, `list_grpc_endpoints`, `find_dead_code`,
+`find_duplicate_methods`, `compute_complexity_metrics`):
 
 - Prefer cursor-based streaming (`chunk_size` 20-50 + `cursor`) over large
   `max_items`/`limit` values. Large single payloads can overflow MCP transport

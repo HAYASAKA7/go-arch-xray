@@ -1,5 +1,6 @@
 # Local editor/agent settings
 .claude/settings.local.json
+.vscode/settings.json
 
 # Build outputs
 go-arch-xray.exe
