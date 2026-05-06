@@ -53,6 +53,11 @@ type LoadedProgram struct {
 	// re-parsing source.
 	methodFingerprints []MethodFingerprint
 
+	// complexityMetrics caches per-function complexity scores captured during
+	// load (before pkg.Syntax is cleared). Used by ComputeComplexityMetrics
+	// without re-parsing source files.
+	complexityMetrics []FunctionComplexity
+
 	chaOnce  sync.Once
 	chaGraph *callgraph.Graph
 }
@@ -340,6 +345,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 	}
 	httpRoutesCache := extractRoutesFromSyntax(pkgs)
 	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
+	complexityMetricsCache := extractComplexityFromSyntax(pkgs)
 
 	// Drop syntax / type info / file listings from every reachable package
 	// to release the bulk of go/packages memory once SSA is built. The
@@ -398,6 +404,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		importLocs:         importLocsCache,
 		httpRoutes:         httpRoutesCache,
 		methodFingerprints: methodFingerprintsCache,
+		complexityMetrics:  complexityMetricsCache,
 	}, nil
 }
 

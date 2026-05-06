@@ -116,3 +116,23 @@ func BenchmarkHandleListHTTPRoutes(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkHandleComputeComplexityMetrics measures cached complexity query latency.
+func BenchmarkHandleComputeComplexityMetrics(b *testing.B) {
+	dir := createMainTestModule(b, "benchcomplexity", map[string]string{
+		"main.go": "package main\n\nfunc main() { complex(3) }\n\nfunc complex(x int) int {\n\ttotal := 0\n\tfor i := 0; i < x; i++ {\n\t\tif i%2 == 0 || i%3 == 0 {\n\t\t\ttotal += i\n\t\t}\n\t}\n\treturn total\n}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, _, err := handleComputeComplexityMetrics(context.Background(), nil, ComplexityMetricsInput{RootPath: dir}); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := handleComputeComplexityMetrics(context.Background(), nil, ComplexityMetricsInput{RootPath: dir})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

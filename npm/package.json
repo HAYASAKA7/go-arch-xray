@@ -1,6 +1,6 @@
 {
   "name": "@hayasaka7/go-arch-xray",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Model Context Protocol server for static analysis of Go codebases (call graphs, import graphs, interface topology, struct lifecycle, HTTP routes).",
   "keywords": [
     "mcp",

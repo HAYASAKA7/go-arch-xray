@@ -27,6 +27,12 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `trace_struct_lifecycle`: Uses SSA to report struct instantiation, field mutation, and interface handoff points. Supports `dedupe_mode`, `max_hops`, and `summary` output controls.
 - `detect_concurrency_risks`: Heuristically flags struct fields mutated inside goroutines without visible mutex or `sync/atomic` protection.
 
+### Code Quality & Refactor Signals
+
+- `find_dead_code`: Reports unexported functions and methods that are unreferenced or unreachable from any program entrypoint via the CHA call graph. Pass `include_exported: true` to also audit exported symbols (useful for internal modules). Result includes caveats — CHA cannot see reflection, plugins, cgo, or `//go:linkname`.
+- `find_duplicate_methods`: Groups together functions and methods whose signature and normalized body match across the workspace. Bodies are hashed after whitespace normalization and comment stripping. Tune `min_body_lines` (default 3) to control the noise floor.
+- `compute_complexity_metrics`: Reports per-function cyclomatic complexity, cognitive complexity, body lines, and max nesting. Use it before refactors, during code review, for onboarding, and when prioritizing tests. Use `min_cyclomatic`, `min_cognitive`, and `sort_by` to focus results; set `include_packages: true` for package-level debt scans. Complexity is a structural risk signal, not proof of performance, security, or correctness problems.
+
 ### Workspace Management
 
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
@@ -34,8 +40,6 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
 - `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
-- `find_dead_code`: Reports unexported functions and methods that are unreferenced or unreachable from any program entrypoint via the CHA call graph. Pass `include_exported: true` to also audit exported symbols (useful for internal modules). Result includes caveats — CHA cannot see reflection, plugins, cgo, or `//go:linkname`.
-- `find_duplicate_methods`: Groups together functions and methods whose signature and normalized body match across the workspace. Bodies are hashed after whitespace normalization and comment stripping. Tune `min_body_lines` (default 3) to control the noise floor.
 
 ## Install From GitHub Releases
 
@@ -210,7 +214,8 @@ High-volume tools also accept:
 For slice-returning tools (`get_interface_topology`, `get_package_dependencies`,
 `find_callers`, `find_reverse_dependencies`, `check_architecture_boundaries`,
 `list_entrypoints`, `list_http_routes`, `analyze_call_hierarchy`,
-`trace_struct_lifecycle`):
+`trace_struct_lifecycle`, `find_dead_code`, `find_duplicate_methods`,
+`compute_complexity_metrics`):
 
 - Prefer cursor-based streaming (`chunk_size` 20-50 + `cursor`) over large
   `max_items`/`limit` values. Large single payloads can overflow MCP transport

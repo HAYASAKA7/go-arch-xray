@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-05-06
+
+### Added
+
+- New `compute_complexity_metrics` MCP tool: reports per-function
+  cyclomatic complexity, cognitive complexity, body lines, and max
+  nesting, with optional per-package aggregate rollups via
+  `include_packages: true`. Results support the standard
+  `limit`/`offset`/`max_items` and cursor streaming controls.
+- Complexity tool guidance in server `Instructions` and the tool
+  description so AI clients know to use it before refactors, during
+  code review, for onboarding, when prioritizing tests, and when
+  assessing package-level architecture debt. Guidance also states that
+  complexity is a structural risk signal, not proof of performance,
+  security, or correctness problems.
+- Cached complexity extraction during workspace load, before ASTs are
+  cleared, so repeated `compute_complexity_metrics` calls do not
+  re-parse source files.
+- Benchmark coverage for cached complexity handler latency.
+
 ## [0.5.5] - 2026-04-30
 
 ### Changed
