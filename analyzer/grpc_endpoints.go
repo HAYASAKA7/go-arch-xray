@@ -107,7 +107,7 @@ func ListGRPCEndpoints(ws *Workspace, dir, pattern string) (*GRPCEndpointsResult
 }
 
 func ListGRPCEndpointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*GRPCEndpointsResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
@@ -183,7 +183,7 @@ func extractGRPCFromSyntax(pkgs []*packages.Package) grpcExtraction {
 				if !ok {
 					return true
 				}
-				registration := extractGRPCRegistration(pkg, call, registerFuncToDesc, services, serviceByShortName)
+				registration := extractGRPCRegistration(pkg, file, call, registerFuncToDesc, services, serviceByShortName)
 				if registration != nil {
 					registrations = append(registrations, *registration)
 				}
@@ -343,14 +343,14 @@ func extractRegisterFuncDescriptor(fset *token.FileSet, fd *ast.FuncDecl) (strin
 	return registerFunc, descName
 }
 
-func extractGRPCRegistration(pkg *packages.Package, call *ast.CallExpr, registerFuncToDesc map[string]string, services map[string]*grpcServiceDesc, serviceByShortName map[string]*grpcServiceDesc) *GRPCRegistration {
+func extractGRPCRegistration(pkg *packages.Package, file *ast.File, call *ast.CallExpr, registerFuncToDesc map[string]string, services map[string]*grpcServiceDesc, serviceByShortName map[string]*grpcServiceDesc) *GRPCRegistration {
 	calleeName := selectorName(call.Fun)
 	if !isGRPCRegisterFuncName(calleeName) || len(call.Args) < 2 {
 		return nil
 	}
 	shortName := strings.TrimSuffix(strings.TrimPrefix(calleeName, "Register"), "Server")
 	serviceName := ""
-	if descKey := registerFuncToDesc[grpcRegisterCallKey(pkg, call.Fun, calleeName)]; descKey != "" {
+	if descKey := registerFuncToDesc[grpcRegisterCallKey(pkg, file, call.Fun, calleeName)]; descKey != "" {
 		if service := services[descKey]; service != nil {
 			serviceName = service.Service
 			shortName = service.ServiceShortName
@@ -501,7 +501,7 @@ func grpcRegisterFuncKey(pkgPath, funcName string) string {
 	return pkgPath + "|" + funcName
 }
 
-func grpcRegisterCallKey(pkg *packages.Package, expr ast.Expr, funcName string) string {
+func grpcRegisterCallKey(pkg *packages.Package, file *ast.File, expr ast.Expr, funcName string) string {
 	if pkg == nil {
 		return ""
 	}
@@ -515,6 +515,25 @@ func grpcRegisterCallKey(pkg *packages.Package, expr ast.Expr, funcName string) 
 			if e.Sel != nil {
 				if obj := pkg.TypesInfo.Uses[e.Sel]; obj != nil && obj.Pkg() != nil {
 					return grpcRegisterFuncKey(obj.Pkg().Path(), funcName)
+				}
+			}
+		}
+	}
+	if sel, ok := expr.(*ast.SelectorExpr); ok {
+		if id, ok := sel.X.(*ast.Ident); ok {
+			if file != nil {
+				for _, imp := range file.Imports {
+					var impName string
+					if imp.Name != nil {
+						impName = imp.Name.Name
+					} else {
+						path := stringLiteral(imp.Path)
+						parts := strings.Split(path, "/")
+						impName = parts[len(parts)-1]
+					}
+					if impName == id.Name {
+						return grpcRegisterFuncKey(stringLiteral(imp.Path), funcName)
+					}
 				}
 			}
 		}

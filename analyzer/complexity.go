@@ -433,7 +433,7 @@ func ComputeComplexityMetrics(ws *Workspace, dir, pattern string) (*ComplexityRe
 
 // ComputeComplexityMetricsWithOptions is the streaming/paginated variant.
 func ComputeComplexityMetricsWithOptions(ws *Workspace, dir, pattern string, cOpts ComplexityOptions, opts QueryOptions) (*ComplexityResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

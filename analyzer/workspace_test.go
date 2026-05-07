@@ -228,3 +228,47 @@ use ./pkg/lib
 		t.Fatalf("expected [./pkg/lib/...], got %v", patterns)
 	}
 }
+
+func TestWorkspaceGetOrLoadSyntaxOnly(t *testing.T) {
+	ws := NewWorkspace()
+
+	dir := createTestModule(t, "syntaxonly", `package main
+
+func Hello() string { return "hi" }
+`)
+
+	prog1, err := ws.GetOrLoadSyntaxOnly(dir, "./...")
+	if err != nil {
+		t.Fatalf("first load failed: %v", err)
+	}
+	if !prog1.SyntaxOnly {
+		t.Error("expected SyntaxOnly true")
+	}
+	if prog1.SSA != nil {
+		t.Error("expected nil SSA program for SyntaxOnly load")
+	}
+
+	// Upgrade to full program
+	prog2, err := ws.GetOrLoad(dir, "./...")
+	if err != nil {
+		t.Fatalf("second load failed: %v", err)
+	}
+	if prog2.SyntaxOnly {
+		t.Error("expected SyntaxOnly false after upgrade")
+	}
+	if prog2.SSA == nil {
+		t.Error("expected non-nil SSA program after upgrade")
+	}
+
+	// Verify that getting syntax only again returns the full program without downgrading
+	prog3, err := ws.GetOrLoadSyntaxOnly(dir, "./...")
+	if err != nil {
+		t.Fatalf("third load failed: %v", err)
+	}
+	if prog3.SyntaxOnly {
+		t.Error("expected returned program to still be full (SyntaxOnly false)")
+	}
+	if prog3 != prog2 {
+		t.Error("expected same instance after getting syntax only on already full program")
+	}
+}

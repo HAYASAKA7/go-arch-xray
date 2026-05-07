@@ -225,7 +225,7 @@ func FindDuplicateMethods(ws *Workspace, dir, pattern string) (*DuplicateMethods
 
 // FindDuplicateMethodsWithOptions is the streaming/paginated variant.
 func FindDuplicateMethodsWithOptions(ws *Workspace, dir, pattern string, dmOpts DuplicateMethodsOptions, opts QueryOptions) (*DuplicateMethodsResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

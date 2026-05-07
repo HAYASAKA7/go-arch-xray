@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.12] - 2026-05-07
+
+### Changed
+
+- Added `GetOrLoadSyntaxOnly` loader path to prevent unnecessary SSA building and typechecking for AST-only tools (`list_http_routes`, `list_grpc_endpoints`, `find_duplicate_methods`, `compute_complexity_metrics`), drastically reducing memory consumption on large repositories.
+- `list_grpc_endpoints` now correctly resolves imports directly from the AST when type information is not available.
+
 ## [0.5.11] - 2026-05-07
 
 ### Changed

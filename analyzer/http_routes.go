@@ -75,7 +75,7 @@ func ListHTTPRoutes(ws *Workspace, dir, pattern string) (*HTTPRoutesResult, erro
 }
 
 func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*HTTPRoutesResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

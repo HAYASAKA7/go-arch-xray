@@ -37,6 +37,11 @@ type LoadedProgram struct {
 	RootPaths map[string]bool
 	Patterns  []string
 
+	// SyntaxOnly is true if this program was loaded without typechecking and SSA.
+	// It is used to serve lightweight queries like list_http_routes without
+	// allocating gigabytes of memory.
+	SyntaxOnly bool
+
 	// importLocs caches per-package import source locations extracted during
 	// load (before pkg.Syntax is cleared). Key: pkg.PkgPath → importPath → loc.
 	// Eliminates the need to re-parse source files in CheckArchitectureBoundaries.
@@ -195,6 +200,45 @@ func (w *Workspace) GetOrLoad(dir, pattern string) (*LoadedProgram, error) {
 
 	w.mu.Lock()
 	if elem, ok := w.cache[key]; ok {
+		prog := elem.Value.(*cacheEntry).prog
+		if !prog.SyntaxOnly {
+			w.order.MoveToFront(elem)
+			w.mu.Unlock()
+			return prog, nil
+		}
+	}
+	w.mu.Unlock()
+
+	v, err, _ := w.group.Do(string(key)+":full", func() (any, error) {
+		prog, err := loadProgram(dir, patterns, false)
+		if err != nil {
+			return nil, err
+		}
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if elem, ok := w.cache[key]; ok {
+			// Replace existing (possibly SyntaxOnly) with full program
+			elem.Value.(*cacheEntry).prog = prog
+			w.order.MoveToFront(elem)
+			return prog, nil
+		}
+		elem := w.order.PushFront(&cacheEntry{key: key, rootPath: dir, patterns: append([]string(nil), patterns...), prog: prog})
+		w.cache[key] = elem
+		w.evictLocked()
+		return prog, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*LoadedProgram), nil
+}
+
+func (w *Workspace) GetOrLoadSyntaxOnly(dir, pattern string) (*LoadedProgram, error) {
+	patterns := normalizePatternsForDir(dir, SplitPatterns(pattern))
+	key := makeCacheKey(dir, patterns)
+
+	w.mu.Lock()
+	if elem, ok := w.cache[key]; ok {
 		w.order.MoveToFront(elem)
 		prog := elem.Value.(*cacheEntry).prog
 		w.mu.Unlock()
@@ -202,8 +246,8 @@ func (w *Workspace) GetOrLoad(dir, pattern string) (*LoadedProgram, error) {
 	}
 	w.mu.Unlock()
 
-	v, err, _ := w.group.Do(string(key), func() (any, error) {
-		prog, err := loadProgram(dir, patterns)
+	v, err, _ := w.group.Do(string(key)+":syntax", func() (any, error) {
+		prog, err := loadProgram(dir, patterns, true)
 		if err != nil {
 			return nil, err
 		}
@@ -277,18 +321,16 @@ func (w *Workspace) Reload(dir, pattern string) (*LoadedProgram, error) {
 	return w.GetOrLoad(dir, pattern)
 }
 
-func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
+func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram, error) {
 	patterns = normalizePatternsForDir(dir, patterns)
 
+	mode := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax
+	if !syntaxOnly {
+		mode |= packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedModule | packages.NeedImports
+	}
+
 	cfg := &packages.Config{
-		Mode: packages.NeedName |
-			packages.NeedCompiledGoFiles |
-			packages.NeedSyntax |
-			packages.NeedTypes |
-			packages.NeedTypesInfo |
-			packages.NeedDeps |
-			packages.NeedModule |
-			packages.NeedImports,
+		Mode:  mode,
 		Dir:   dir,
 		Tests: false,
 	}
@@ -311,28 +353,23 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		for _, e := range loadErrs {
 			logger.Printf("package error: %v", e)
 		}
-		hasTypes := false
-		for _, pkg := range pkgs {
-			if pkg.Types != nil {
-				hasTypes = true
-				break
+		if !syntaxOnly {
+			hasTypes := false
+			for _, pkg := range pkgs {
+				if pkg.Types != nil {
+					hasTypes = true
+					break
+				}
 			}
-		}
-		if !hasTypes {
-			return nil, fmt.Errorf("all packages failed to load: %v", loadErrs[0])
+			if !hasTypes {
+				return nil, fmt.Errorf("all packages failed to load: %v", loadErrs[0])
+			}
 		}
 	}
 
-	// Build SSA bodies only for the requested (root) packages. Transitive
-	// dependencies are still represented in the SSA program as type-only
-	// entries so we can resolve cross-package types, but we never pay the
-	// memory cost of compiling stdlib bodies into SSA. ssa.BareInits skips
-	// init function synthesis to further trim memory.
-	prog, _ := ssautil.Packages(pkgs, ssa.InstantiateGenerics|ssa.BareInits)
-	if prog == nil {
-		return nil, fmt.Errorf("ssa program could not be created (likely due to type errors above)")
-	}
-	prog.Build()
+	var prog *ssa.Program
+	var funcs []*ssa.Function
+	var importLocsCache map[string]map[string]importSourceLoc
 
 	rootPaths := make(map[string]bool, len(pkgs))
 	for _, pkg := range pkgs {
@@ -341,13 +378,42 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		}
 	}
 
+	if !syntaxOnly {
+		// Build SSA bodies only for the requested (root) packages. Transitive
+		// dependencies are still represented in the SSA program as type-only
+		// entries so we can resolve cross-package types, but we never pay the
+		// memory cost of compiling stdlib bodies into SSA. ssa.BareInits skips
+		// init function synthesis to further trim memory.
+		prog, _ = ssautil.Packages(pkgs, ssa.InstantiateGenerics|ssa.BareInits)
+		if prog == nil {
+			return nil, fmt.Errorf("ssa program could not be created (likely due to type errors above)")
+		}
+		prog.Build()
+
+		importLocsCache = make(map[string]map[string]importSourceLoc, len(pkgs))
+		for _, pkg := range pkgs {
+			importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
+		}
+
+		// Because we used ssautil.Packages (root-only build), AllFunctions
+		// already returns ~root SSA funcs only. Filter defensively to root
+		// packages so analyzers never traverse synthetic stdlib wrappers.
+		allFuncs := ssautil.AllFunctions(prog)
+		funcs = make([]*ssa.Function, 0, len(allFuncs))
+		for fn := range allFuncs {
+			if fn == nil || fn.Pkg == nil || fn.Pkg.Pkg == nil {
+				continue
+			}
+			if !rootPaths[fn.Pkg.Pkg.Path()] {
+				continue
+			}
+			funcs = append(funcs, fn)
+		}
+	}
+
 	// Capture import source locations and HTTP routes from syntax BEFORE
 	// clearing pkg.Syntax and trimming pkg.CompiledGoFiles. This eliminates
 	// the need to re-parse source files on every analysis call.
-	importLocsCache := make(map[string]map[string]importSourceLoc, len(pkgs))
-	for _, pkg := range pkgs {
-		importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
-	}
 	httpRoutesCache := extractRoutesFromSyntax(pkgs)
 	grpcCache := extractGRPCFromSyntax(pkgs)
 	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
@@ -384,22 +450,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		clear(pkg)
 	}
 
-	// Because we used ssautil.Packages (root-only build), AllFunctions
-	// already returns ~root SSA funcs only. Filter defensively to root
-	// packages so analyzers never traverse synthetic stdlib wrappers.
-	allFuncs := ssautil.AllFunctions(prog)
-	funcs := make([]*ssa.Function, 0, len(allFuncs))
-	for fn := range allFuncs {
-		if fn == nil || fn.Pkg == nil || fn.Pkg.Pkg == nil {
-			continue
-		}
-		if !rootPaths[fn.Pkg.Pkg.Path()] {
-			continue
-		}
-		funcs = append(funcs, fn)
-	}
-
-	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v", len(pkgs), len(funcs), dir, patterns)
+	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v syntaxOnly=%v", len(pkgs), len(funcs), dir, patterns, syntaxOnly)
 
 	return &LoadedProgram{
 		Packages:           pkgs,
@@ -407,6 +458,7 @@ func loadProgram(dir string, patterns []string) (*LoadedProgram, error) {
 		SSAFuncs:           funcs,
 		RootPaths:          rootPaths,
 		Patterns:           patterns,
+		SyntaxOnly:         syntaxOnly,
 		importLocs:         importLocsCache,
 		httpRoutes:         httpRoutesCache,
 		grpcEndpoints:      grpcCache.endpoints,
