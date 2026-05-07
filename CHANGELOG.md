@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.11] - 2026-05-07
+
+### Changed
+
+- Fix CI workflow.
+
 ## [0.5.10] - 2026-05-06
 
 ### Added
@@ -15,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - npm wrapper launcher script (`bin/go-arch-xray.js`) for package distribution.
 - Version tracking in npm installer to support proper upgrades between versions.
 - Markdown lint configuration (`.markdownlint.jsonc`) for CHANGELOG validation.
-- Limitations section in README documenting CHA over-approximation, concurrency heuristics, SSA scope, and dead code detection caveats.
+- Limitations section in README documenting CHA over-approximation, concurrency
+  heuristics, SSA scope, and dead code detection caveats.
 - Troubleshooting section in README covering empty results, stale cache, and large repositories.
 
 ### Changed

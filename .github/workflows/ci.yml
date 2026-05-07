@@ -24,7 +24,7 @@ jobs:
 
       - name: gofmt check
         run: |
-          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          if [ "$(gofmt -s -l . 2>/dev/null | wc -l | tr -d ' ')" -gt 0 ]; then
             echo "Code is not formatted:"
             gofmt -s -d .
             exit 1
