@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-11
+
+### Added
+
+- New `find_orphaned_database_models` MCP tool: detects database models that are defined but never initialized or used in queries. Currently supports GORM (gorm:"..." tagged structs).
+  - Scans for structs with GORM tags during workspace load (before AST clearing) for efficient detection
+  - Uses CHA call graph to check for struct references across the codebase
+  - Detects common GORM operations: Find, First, Create, Save, Update, Delete, Where, Model, AutoMigrate
+  - Returns orphaned models with reason codes (`no_references`, `no_orm_usage`), source locations, and notes
+  - Supports cursor streaming for large codebases with many models
+  - Includes caveats about reflection patterns, raw SQL, and test-only models
+- Added `GormModel` type and `gormModels` cache field in `LoadedProgram` for storing discovered GORM models
+- Added `extractGormModelsFromSyntax` function for AST-based GORM tag detection
+- Added comprehensive tests for GORM tag detection, ORM operation recognition, and key generation
+
 ## [0.5.12] - 2026-05-07
 
 ### Changed
