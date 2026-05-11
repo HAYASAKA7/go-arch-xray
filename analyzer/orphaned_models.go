@@ -336,16 +336,16 @@ func isOrmOperation(call *ssa.Call) bool {
 	methodName := call.Call.Method.Name()
 	// Common GORM methods
 	gormMethods := map[string]bool{
-		"Find":       true,
-		"First":      true,
-		"Last":       true,
-		"Take":       true,
-		"Create":     true,
-		"Save":       true,
-		"Update":     true,
-		"Delete":     true,
-		"Where":      true,
-		"Model":      true,
+		"Find":        true,
+		"First":       true,
+		"Last":        true,
+		"Take":        true,
+		"Create":      true,
+		"Save":        true,
+		"Update":      true,
+		"Delete":      true,
+		"Where":       true,
+		"Model":       true,
 		"AutoMigrate": true,
 	}
 

@@ -55,16 +55,16 @@ func TestIsOrmOperation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test the GORM method mapping
 			gormMethods := map[string]bool{
-				"Find":       true,
-				"First":      true,
-				"Last":       true,
-				"Take":       true,
-				"Create":     true,
-				"Save":       true,
-				"Update":     true,
-				"Delete":     true,
-				"Where":      true,
-				"Model":      true,
+				"Find":        true,
+				"First":       true,
+				"Last":        true,
+				"Take":        true,
+				"Create":      true,
+				"Save":        true,
+				"Update":      true,
+				"Delete":      true,
+				"Where":       true,
+				"Model":       true,
 				"AutoMigrate": true,
 			}
 			result := gormMethods[tt.method]
@@ -77,9 +77,9 @@ func TestIsOrmOperation(t *testing.T) {
 
 func TestOrphanedModelKey(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		model OrphanedModel
-		want string
+		want  string
 	}{
 		{
 			name: "simple",

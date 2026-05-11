@@ -431,7 +431,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 	grpcCache := extractGRPCFromSyntax(pkgs)
 	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
 	complexityMetricsCache := extractComplexityFromSyntax(pkgs)
-		gormModelsCache := extractGormModelsFromSyntax(pkgs)
+	gormModelsCache := extractGormModelsFromSyntax(pkgs)
 
 	// Drop syntax / type info / file listings from every reachable package
 	// to release the bulk of go/packages memory once SSA is built. The
@@ -479,7 +479,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		grpcRegistrations:  grpcCache.registrations,
 		methodFingerprints: methodFingerprintsCache,
 		complexityMetrics:  complexityMetricsCache,
-			gormModels:        gormModelsCache,
+		gormModels:         gormModelsCache,
 	}, nil
 }
 
