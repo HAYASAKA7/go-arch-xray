@@ -1,6 +1,6 @@
 module github.com/HAYASAKA7/go-arch-xray
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.0
