@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -77,31 +78,31 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 		framework = "gorm"
 	}
 
-	if framework != "gorm" {
-		return nil, fmt.Errorf("unsupported ORM framework: %s (currently only 'gorm' is supported)", framework)
+	if framework != "gorm" && framework != "ent" && framework != "sqlx" {
+		return nil, fmt.Errorf("unsupported ORM framework: %s (currently 'gorm', 'ent', and 'sqlx' are supported)", framework)
 	}
 
-	// Use cached GORM models extracted during load
-	cachedModels := prog.gormModels
+	// Use cached ORM models extracted during load
+	cachedModels := prog.ormModels
 	if cachedModels == nil {
-		cachedModels = []GormModel{}
+		cachedModels = []OrmModel{}
 	}
 
 	// Convert cached models to a more detailed format for analysis
 	type detailedModel struct {
-		GormModel
+		OrmModel
 		SSAType types.Type
 	}
 
 	detailed := make([]detailedModel, 0, len(cachedModels))
-	for _, gm := range cachedModels {
-		typ, err := findModelType(prog, gm)
+	for _, om := range cachedModels {
+		typ, err := findModelType(prog, om)
 		if err != nil {
 			continue // Skip if we can't find the type
 		}
 		detailed = append(detailed, detailedModel{
-			GormModel: gm,
-			SSAType:   typ,
+			OrmModel: om,
+			SSAType:  typ,
 		})
 	}
 
@@ -109,7 +110,7 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 	orphaned := make([]OrphanedModel, 0, len(detailed)/4) // Assume ~25% are orphaned
 	for _, model := range detailed {
 		refs := countStructReferences(prog.SSAFuncs, model.SSAType)
-		ormUsage := hasOrmUsage(prog.SSAFuncs, model.SSAType)
+		ormUsage := hasOrmUsage(prog.SSAFuncs, model.SSAType, model.Framework)
 
 		var reason OrphanedModelReason
 		var notes string
@@ -131,7 +132,7 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 			File:         model.File,
 			Line:         model.Line,
 			Anchor:       contextAnchor(model.File, model.Line, model.Name),
-			ORMFramework: framework,
+			ORMFramework: model.Framework,
 			Reason:       reason,
 			Notes:        notes,
 		})
@@ -176,14 +177,14 @@ func orphanedModelKey(m OrphanedModel) string {
 	return m.Package + "|" + m.Name + "|" + m.File + ":" + fmt.Sprintf("%d", m.Line)
 }
 
-// findModelType finds the types.Type for a GORMModel by looking it up in the package.
-func findModelType(prog *LoadedProgram, gm GormModel) (types.Type, error) {
+// findModelType finds the types.Type for an OrmModel by looking it up in the package.
+func findModelType(prog *LoadedProgram, om OrmModel) (types.Type, error) {
 	for _, pkg := range prog.Packages {
-		if pkg == nil || pkg.Types == nil || pkg.PkgPath != gm.Pkg {
+		if pkg == nil || pkg.Types == nil || pkg.PkgPath != om.Pkg {
 			continue
 		}
 		scope := pkg.Types.Scope()
-		obj := scope.Lookup(gm.Name)
+		obj := scope.Lookup(om.Name)
 		if obj == nil {
 			continue
 		}
@@ -193,7 +194,7 @@ func findModelType(prog *LoadedProgram, gm GormModel) (types.Type, error) {
 		}
 		return tn.Type(), nil
 	}
-	return nil, fmt.Errorf("model type not found: %s.%s", gm.Pkg, gm.Name)
+	return nil, fmt.Errorf("model type not found: %s.%s", om.Pkg, om.Name)
 }
 
 // countStructReferences counts how many times the struct type is referenced.
@@ -283,7 +284,7 @@ func instructionReferencesType(instr ssa.Instruction, targetType types.Type) boo
 }
 
 // hasOrmUsage checks if the model is used in common ORM operations.
-func hasOrmUsage(funcs []*ssa.Function, targetType types.Type) bool {
+func hasOrmUsage(funcs []*ssa.Function, targetType types.Type, framework string) bool {
 	for _, fn := range funcs {
 		if fn == nil {
 			continue
@@ -296,8 +297,8 @@ func hasOrmUsage(funcs []*ssa.Function, targetType types.Type) bool {
 					continue
 				}
 
-				// Check for common GORM function names
-				if isOrmOperation(call) {
+				// Check for common ORM method names
+				if isOrmOperation(call, framework) {
 					// Check if first argument is our model type
 					if len(call.Call.Args) > 0 {
 						argType := pointerElem(call.Call.Args[0].Type())
@@ -328,35 +329,68 @@ func hasOrmUsage(funcs []*ssa.Function, targetType types.Type) bool {
 }
 
 // isOrmOperation checks if a call is to a common ORM method.
-func isOrmOperation(call *ssa.Call) bool {
+func isOrmOperation(call *ssa.Call, framework string) bool {
 	if call.Call.Method == nil {
 		return false
 	}
 
 	methodName := call.Call.Method.Name()
-	// Common GORM methods
-	gormMethods := map[string]bool{
-		"Find":        true,
-		"First":       true,
-		"Last":        true,
-		"Take":        true,
-		"Create":      true,
-		"Save":        true,
-		"Update":      true,
-		"Delete":      true,
-		"Where":       true,
-		"Model":       true,
-		"AutoMigrate": true,
+
+	// GORM methods
+	if framework == "gorm" {
+		gormMethods := map[string]bool{
+			"Find":        true,
+			"First":       true,
+			"Last":        true,
+			"Take":        true,
+			"Create":      true,
+			"Save":        true,
+			"Update":      true,
+			"Delete":      true,
+			"Where":       true,
+			"Model":       true,
+			"AutoMigrate": true,
+		}
+		return gormMethods[methodName]
 	}
 
-	return gormMethods[methodName]
+	// ent methods (ent.Client)
+	if framework == "ent" {
+		entMethods := map[string]bool{
+			"Create":    true,
+			"UpdateOne": true,
+			"Update":    true,
+			"Delete":    true,
+			"DeleteOne": true,
+			"Query":     true,
+			"Get":       true,
+			"First":     true,
+			"Count":     true,
+		}
+		return entMethods[methodName]
+	}
+
+	// sqlx methods (sqlx.DB, sqlx.Tx)
+	if framework == "sqlx" {
+		sqlxMethods := map[string]bool{
+			"Get":       true,
+			"Select":    true,
+			"Exec":      true,
+			"NamedExec": true,
+			"Query":     true,
+			"QueryRow":  true,
+		}
+		return sqlxMethods[methodName]
+	}
+
+	return false
 }
 
-// extractGormModelsFromSyntax walks pkg.Syntax for every package to collect
-// structs with GORM tags. Called once during loadProgram before pkg.Syntax is
+// extractOrmModelsFromSyntax walks pkg.Syntax for every package to collect
+// database models with ORM tags. Called once during loadProgram before pkg.Syntax is
 // cleared, so no source re-parsing is needed.
-func extractGormModelsFromSyntax(pkgs []*packages.Package) []GormModel {
-	var models []GormModel
+func extractOrmModelsFromSyntax(pkgs []*packages.Package) []OrmModel {
+	var models []OrmModel
 	for _, pkg := range pkgs {
 		if pkg.Fset == nil || len(pkg.Syntax) == 0 {
 			continue
@@ -376,14 +410,15 @@ func extractGormModelsFromSyntax(pkgs []*packages.Package) []GormModel {
 					if !ok {
 						continue
 					}
-					// Check if any field has a GORM tag
-					if hasGormTagInAST(structType) {
+					framework := detectOrmFrameworkFromAST(structType, pkg.Fset.Position(typeSpec.Pos()).Filename)
+					if framework != "" {
 						pos := pkg.Fset.Position(typeSpec.Pos())
-						models = append(models, GormModel{
-							Name: typeSpec.Name.Name,
-							Pkg:  pkg.PkgPath,
-							File: pos.Filename,
-							Line: pos.Line,
+						models = append(models, OrmModel{
+							Name:      typeSpec.Name.Name,
+							Pkg:       pkg.PkgPath,
+							File:      pos.Filename,
+							Line:      pos.Line,
+							Framework: framework,
 						})
 					}
 				}
@@ -392,6 +427,12 @@ func extractGormModelsFromSyntax(pkgs []*packages.Package) []GormModel {
 		}
 	}
 	return models
+}
+
+// extractGormModelsFromSyntax is a legacy wrapper for backwards compatibility.
+// Use extractOrmModelsFromSyntax instead.
+func extractGormModelsFromSyntax(pkgs []*packages.Package) []OrmModel {
+	return extractOrmModelsFromSyntax(pkgs)
 }
 
 // hasGormTagInAST checks if any struct field has a GORM tag in the AST.
@@ -408,4 +449,61 @@ func hasGormTagInAST(structType *ast.StructType) bool {
 		}
 	}
 	return false
+}
+
+// hasEntTagInAST checks if a struct implements ent.Schema or is in an ent schema file.
+func hasEntTagInAST(structType *ast.StructType, filename string) bool {
+	// Check if file is in ent/schema directory
+	if strings.Contains(filepath.ToSlash(filename), "ent/schema/") {
+		return true
+	}
+	// Check for field types that suggest ent (ent.Field)
+	if structType.Fields == nil {
+		return false
+	}
+	for _, field := range structType.Fields.List {
+		if field.Type != nil {
+			// Look for ent.Field types in field declarations
+			if sel, ok := field.Type.(*ast.SelectorExpr); ok {
+				if sel.Sel != nil && (sel.Sel.Name == "Field" || sel.Sel.Name == "schema") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasSqlxTagInAST checks if any struct field has a sqlx db tag.
+func hasSqlxTagInAST(structType *ast.StructType) bool {
+	if structType.Fields == nil {
+		return false
+	}
+	for _, field := range structType.Fields.List {
+		if field.Tag != nil {
+			tag := strings.Trim(field.Tag.Value, "`")
+			// sqlx uses "db:" tag for column names
+			if strings.Contains(tag, "db:") || strings.Contains(tag, `db"`) {
+				// Exclude gorm models which also use db: tags
+				if !strings.Contains(tag, "gorm:") && !strings.Contains(tag, `gorm"`) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// detectOrmFrameworkFromAST detects which ORM framework a struct belongs to.
+func detectOrmFrameworkFromAST(structType *ast.StructType, filename string) string {
+	if hasGormTagInAST(structType) {
+		return "gorm"
+	}
+	if hasEntTagInAST(structType, filename) {
+		return "ent"
+	}
+	if hasSqlxTagInAST(structType) {
+		return "sqlx"
+	}
+	return ""
 }

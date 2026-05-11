@@ -71,7 +71,7 @@ type LoadedProgram struct {
 	// gormModels caches structs with GORM tags captured during load
 	// (before pkg.Syntax is cleared). Used by FindOrphanedDatabaseModels
 	// without re-parsing source files.
-	gormModels []GormModel
+	ormModels []OrmModel
 
 	chaOnce  sync.Once
 	chaGraph *callgraph.Graph
@@ -103,12 +103,13 @@ type CacheRecord struct {
 	FunctionsLoaded int      `json:"functions_loaded"`
 }
 
-// GormModel represents a struct with GORM tags discovered during load.
-type GormModel struct {
-	Name string
-	Pkg  string
-	File string
-	Line int
+// OrmModel represents a database model discovered during load.
+type OrmModel struct {
+	Name      string
+	Pkg       string
+	File      string
+	Line      int
+	Framework string // "gorm", "ent", "sqlx", etc.
 }
 
 // Workspace is a process-scoped LRU cache of LoadedProgram instances guarded
@@ -431,7 +432,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 	grpcCache := extractGRPCFromSyntax(pkgs)
 	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
 	complexityMetricsCache := extractComplexityFromSyntax(pkgs)
-	gormModelsCache := extractGormModelsFromSyntax(pkgs)
+	ormModelsCache := extractOrmModelsFromSyntax(pkgs)
 
 	// Drop syntax / type info / file listings from every reachable package
 	// to release the bulk of go/packages memory once SSA is built. The
@@ -479,7 +480,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		grpcRegistrations:  grpcCache.registrations,
 		methodFingerprints: methodFingerprintsCache,
 		complexityMetrics:  complexityMetricsCache,
-		gormModels:         gormModelsCache,
+		ormModels:          ormModelsCache,
 	}, nil
 }
 

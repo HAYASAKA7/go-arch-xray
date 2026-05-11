@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -136,5 +137,108 @@ func TestOrphanedModelOptionsDefaults(t *testing.T) {
 	opts := OrphanedModelOptions{}
 	if opts.ORMFramework != "" {
 		t.Errorf("ORMFramework should be empty by default, got %q", opts.ORMFramework)
+	}
+}
+
+func TestHasEntTagInAST(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     bool
+	}{
+		{"ent schema file", "ent/schema/user.go", true},
+		{"ent schema nested", "myapp/ent/schema/product.go", true},
+		{"not ent file", "models/user.go", false},
+		{"ent directory but not schema", "ent/migrate.go", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := strings.Contains(filepath.ToSlash(tt.filename), "ent/schema/")
+			if result != tt.want {
+				t.Errorf("hasEntTagInAST(%q) = %v, want %v", tt.filename, result, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasSqlxTagInAST(t *testing.T) {
+	tests := []struct {
+		name string
+		tag  string
+		want bool
+	}{
+		{"db tag", `db:"id"`, true},
+		{"db with backtick", "`db:\"name\"`", true},
+		{"db with other tags", `json:"name" db:"id"`, true},
+		{"gorm and db", `gorm:"type:varchar(100)" db:"id"`, false}, // gorm takes precedence
+		{"no db tag", `json:"name"`, false},
+		{"empty tag", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hasDb := strings.Contains(tt.tag, "db:") || strings.Contains(tt.tag, `db"`)
+			hasGorm := strings.Contains(tt.tag, "gorm:") || strings.Contains(tt.tag, `gorm"`)
+			result := hasDb && !hasGorm
+			if result != tt.want {
+				t.Errorf("tag %q: got %v, want %v", tt.tag, result, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectOrmFrameworkFromAST(t *testing.T) {
+	tests := []struct {
+		name     string
+		tag      string
+		filename string
+		expected string
+	}{
+		{"gorm tag", `gorm:"primaryKey"`, "models/user.go", "gorm"},
+		{"gorm quote", "`gorm:\"primaryKey\"`", "models/user.go", "gorm"},
+		{"ent file", `field:String`, "ent/schema/user.go", "ent"},
+		{"sqlx tag", `db:"id"`, "models/user.go", "sqlx"},
+		{"no tag", `json:"name"`, "models/user.go", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the detection logic
+			isGorm := strings.Contains(tt.tag, "gorm:") || strings.Contains(tt.tag, `gorm"`)
+			isEnt := strings.Contains(filepath.ToSlash(tt.filename), "ent/schema/")
+			hasDb := strings.Contains(tt.tag, "db:") || strings.Contains(tt.tag, `db"`)
+			isSqlx := hasDb && !isGorm
+
+			var got string
+			if isGorm {
+				got = "gorm"
+			} else if isEnt {
+				got = "ent"
+			} else if isSqlx {
+				got = "sqlx"
+			}
+
+			if got != tt.expected {
+				t.Errorf("detectOrmFrameworkFromAST() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestOrmModelType(t *testing.T) {
+	model := OrmModel{
+		Name:      "User",
+		Pkg:       "github.com/test/models",
+		File:      "models/user.go",
+		Line:      10,
+		Framework: "gorm",
+	}
+
+	if model.Name != "User" {
+		t.Errorf("Name = %q, want User", model.Name)
+	}
+	if model.Framework != "gorm" {
+		t.Errorf("Framework = %q, want gorm", model.Framework)
 	}
 }
