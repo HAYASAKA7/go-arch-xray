@@ -429,12 +429,6 @@ func extractOrmModelsFromSyntax(pkgs []*packages.Package) []OrmModel {
 	return models
 }
 
-// extractGormModelsFromSyntax is a legacy wrapper for backwards compatibility.
-// Use extractOrmModelsFromSyntax instead.
-func extractGormModelsFromSyntax(pkgs []*packages.Package) []OrmModel {
-	return extractOrmModelsFromSyntax(pkgs)
-}
-
 // hasGormTagInAST checks if any struct field has a GORM tag in the AST.
 func hasGormTagInAST(structType *ast.StructType) bool {
 	if structType.Fields == nil {
