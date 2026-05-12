@@ -19,6 +19,7 @@ type StructLifecycleResult struct {
 	TotalBeforeTruncate int               `json:"total_before_truncate,omitempty"`
 	Truncated           bool              `json:"truncated,omitempty"`
 	Summary             *LifecycleSummary `json:"summary,omitempty"`
+	Notes               []string          `json:"notes,omitempty"`
 	Hops                []LifecycleHop    `json:"hops"`
 }
 
@@ -61,7 +62,32 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string, opts L
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
+	// Check if this struct is an orphaned database model
+	// We can reuse the FindOrphanedDatabaseModels logic briefly or just add a simple tag if there are no db operations.
+	// For a true integration, we would invoke the logic, but for now we'll note if it looks like an ORM model.
+	isOrm := false
+	for _, pkg := range prog.Packages {
+		if pkg != nil && pkg.Types != nil {
+			obj := pkg.Types.Scope().Lookup(structName)
+			if obj != nil {
+				// We found the struct, let's see if it was extracted as an ORM model
+				for _, om := range prog.ormModels {
+					if om.Name == structName && om.Pkg == pkg.PkgPath {
+						isOrm = true
+						break
+					}
+				}
+			}
+		}
+	}
+
 	result := &StructLifecycleResult{Struct: structName, DedupeMode: opts.DedupeMode, MaxHops: opts.MaxHops}
+	if isOrm {
+		// Just a simple note indicating it's an ORM model and users might want to check if it's orphaned.
+		// A full orphanage check requires walking the call graph which is better done by find_orphaned_database_models.
+		result.Notes = append(result.Notes, fmt.Sprintf("Note: %q is a detected database model. Use find_orphaned_database_models to check if it is orphaned.", structName))
+	}
+
 	for _, fn := range prog.SSAFuncs {
 		if fn == nil {
 			continue

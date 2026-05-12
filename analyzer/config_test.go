@@ -120,3 +120,24 @@ func equalStringSlices(a, b []string) bool {
 	}
 	return true
 }
+
+func TestEffectiveWorkspaceConfig_ORM(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+	writeConfigTestFile(t, dir, WorkspaceConfigFile, "version: 1\norm:\n  default_framework: bun\n  migration_dirs:\n    - db/migrations\n  table_inference: snake\n")
+
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		t.Fatalf("effective config: %v", err)
+	}
+
+	if config.ORM.DefaultFramework != "bun" {
+		t.Errorf("Expected default_framework to be bun, got %q", config.ORM.DefaultFramework)
+	}
+	if len(config.ORM.MigrationDirs) != 1 || config.ORM.MigrationDirs[0] != "db/migrations" {
+		t.Errorf("Expected migration_dirs to be [db/migrations], got %v", config.ORM.MigrationDirs)
+	}
+	if config.ORM.TableInference != "snake" {
+		t.Errorf("Expected table_inference to be snake, got %q", config.ORM.TableInference)
+	}
+}

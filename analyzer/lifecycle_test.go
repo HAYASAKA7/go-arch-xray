@@ -3,6 +3,7 @@ package analyzer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -219,4 +220,36 @@ func createLifecycleTestModule(t *testing.T, name string, files map[string]strin
 		}
 	}
 	return dir
+}
+
+func TestTraceStructLifecycle_FlagsORMModel(t *testing.T) {
+	dir := createLifecycleTestModule(t, "lifeorm", map[string]string{
+		"main.go": `package main
+
+type User struct {
+	Name string ` + "`gorm:\"primaryKey\"`" + `
+}
+
+func Run(u *User) {
+	u.Name = "a"
+}
+`,
+	})
+
+	ws := NewWorkspace()
+	result, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	foundNote := false
+	for _, note := range result.Notes {
+		if strings.Contains(note, "detected database model") {
+			foundNote = true
+			break
+		}
+	}
+	if !foundNote {
+		t.Fatalf("expected note about detected database model, got notes: %v", result.Notes)
+	}
 }

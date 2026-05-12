@@ -25,6 +25,13 @@ type WorkspaceConfig struct {
 	Boundaries      []BoundaryRule   `json:"boundaries,omitempty" yaml:"boundaries,omitempty"`
 	Complexity      ConfigComplexity `json:"complexity,omitempty" yaml:"complexity,omitempty"`
 	Lifecycle       ConfigLifecycle  `json:"lifecycle,omitempty" yaml:"lifecycle,omitempty"`
+	ORM             ConfigORM        `json:"orm,omitempty" yaml:"orm,omitempty"`
+}
+
+type ConfigORM struct {
+	DefaultFramework string   `json:"default_framework,omitempty" yaml:"default_framework,omitempty"`
+	MigrationDirs    []string `json:"migration_dirs,omitempty" yaml:"migration_dirs,omitempty"`
+	TableInference   string   `json:"table_inference,omitempty" yaml:"table_inference,omitempty"`
 }
 
 type ConfigWorkspace struct {
@@ -290,7 +297,22 @@ func mergeWorkspaceConfig(base, overlay WorkspaceConfig) WorkspaceConfig {
 	}
 	merged.Complexity = mergeConfigComplexity(merged.Complexity, overlay.Complexity)
 	merged.Lifecycle = mergeConfigLifecycle(merged.Lifecycle, overlay.Lifecycle)
+	merged.ORM = mergeConfigORM(merged.ORM, overlay.ORM)
 	return normalizeWorkspaceConfig(merged)
+}
+
+func mergeConfigORM(base, overlay ConfigORM) ConfigORM {
+	out := base
+	if strings.TrimSpace(overlay.DefaultFramework) != "" {
+		out.DefaultFramework = strings.TrimSpace(overlay.DefaultFramework)
+	}
+	if len(overlay.MigrationDirs) > 0 {
+		out.MigrationDirs = append([]string(nil), overlay.MigrationDirs...)
+	}
+	if strings.TrimSpace(overlay.TableInference) != "" {
+		out.TableInference = strings.TrimSpace(overlay.TableInference)
+	}
+	return out
 }
 
 func mergeConfigOutput(base, overlay ConfigOutput) ConfigOutput {
