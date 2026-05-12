@@ -31,7 +31,7 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 
 - `find_dead_code`: Reports unexported functions and methods that are unreferenced or unreachable from any program entrypoint via the CHA call graph. Pass `include_exported: true` to also audit exported symbols (useful for internal modules). Result includes caveats — CHA cannot see reflection, plugins, cgo, or `//go:linkname`.
 - `find_duplicate_methods`: Groups together functions and methods whose signature and normalized body match across the workspace. Bodies are hashed after whitespace normalization and comment stripping. Tune `min_body_lines` (default 3) to control the noise floor.
-- `find_orphaned_database_models`: Detects database models that are defined but never initialized or used in queries. Currently supports GORM (`gorm:"..."` tagged structs), ent, and sqlx. Reports models with zero database-related references including queries, migrations, and ORM operations. Use for refactoring cleanup, schema hygiene, and audit trail of unused models.
+- `find_orphaned_database_models`: Detects database models that are defined but never initialized or used in queries. Currently supports GORM (`gorm:"..."` tagged structs), ent, sqlx, bun, and sqlc. Reports models with zero database-related references including queries, migrations, and ORM operations. Includes advanced features like table name inference and cross-referencing with migration files to reduce false positives. Use for refactoring cleanup, schema hygiene, and audit trail of unused models.
 - `compute_complexity_metrics`: Reports per-function cyclomatic complexity, cognitive complexity, body lines, max nesting, Halstead metrics, and `maintainability_index`. Use it before refactors, during code review, for onboarding, and when prioritizing tests. Use `min_cyclomatic`, `min_cognitive`, `min_halstead_volume`, `max_maintainability_index`, and `sort_by` to focus results; set `include_packages: true` for package-level debt scans. Prefer `sort_by: "halstead_volume"` or `"halstead_effort"` for dense expression/operator-heavy code, and `sort_by: "maintainability"` to review lowest maintainability scores first. Complexity, Halstead, and maintainability metrics are structural ranking signals, not proof of performance, security, or correctness problems.
 
 ### Workspace Management
@@ -81,6 +81,11 @@ complexity:
 lifecycle:
   dedupe_mode: function_kind_field
   max_hops: 1000
+orm:
+  default_framework: gorm
+  migration_dirs:
+    - db/migrations
+  table_inference: snake
 ```
 
 User-local defaults are also supported at the OS config path, for example `%APPDATA%\go-arch-xray\config.yml` on Windows or `~/.config/go-arch-xray/config.yml` on Linux. Repo config should hold shared team policy; user-local config is best for personal output preferences.

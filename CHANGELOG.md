@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-05-12
+
+### Added
+- Added support for `bun` and `sqlc` ORM frameworks to the `find_orphaned_database_models` tool.
+- Introduced advanced ORM detection features:
+  - Table name inference for common conventions (e.g., `snake`, `exact`).
+  - Migration file parsing to cross-reference table existence and reduce false positives for orphaned models.
+- Added a new `ORM` section to the `.go-arch-xray.yml` configuration to customize the `default_framework`, `migration_dirs`, and `table_inference` rules.
+- Integrated an "orphanage" classification advisory note into `trace_struct_lifecycle` for detected database models.
+
 ## [0.6.1] - 2026-05-11
 
 ### Added
