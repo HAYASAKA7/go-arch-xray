@@ -4,6 +4,9 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"fmt"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -376,18 +379,26 @@ func (w *Workspace) Reload(dir, pattern string) (*LoadedProgram, error) {
 func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, error) {
 	patterns = normalizePatternsForDir(dir, patterns)
 
-	pkgMode := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax
-	if mode >= LoadModeTypes {
-		pkgMode |= packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedModule | packages.NeedImports
+	var pkgs []*packages.Package
+	var err error
+
+	if mode == LoadModeSyntax {
+		pkgs, err = loadSyntaxOnlyFast(dir, patterns)
+	} else {
+		pkgMode := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax
+		if mode >= LoadModeTypes {
+			pkgMode |= packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedModule | packages.NeedImports
+		}
+
+		cfg := &packages.Config{
+			Mode:  pkgMode,
+			Dir:   dir,
+			Tests: false,
+		}
+
+		pkgs, err = packages.Load(cfg, patterns...)
 	}
 
-	cfg := &packages.Config{
-		Mode:  pkgMode,
-		Dir:   dir,
-		Tests: false,
-	}
-
-	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
@@ -691,4 +702,105 @@ func AllLoadedPackages(roots []*packages.Package) map[string]*packages.Package {
 		walk(r)
 	}
 	return out
+}
+
+func loadSyntaxOnlyFast(dir string, patterns []string) ([]*packages.Package, error) {
+	fset := token.NewFileSet()
+	pkgs := make(map[string]*packages.Package)
+
+	// Attempt to find module path
+	modPath := ""
+	if modBytes, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
+		for _, line := range strings.Split(string(modBytes), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "module ") {
+				modPath = strings.TrimSpace(strings.TrimPrefix(line, "module "))
+				break
+			}
+		}
+	}
+
+	processDir := func(dpath string, recursive bool) error {
+		return filepath.WalkDir(dpath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				if path != dpath && !recursive {
+					return filepath.SkipDir
+				}
+				name := d.Name()
+				if name == "vendor" || name == ".git" || name == "testdata" || name == "node_modules" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
+				return nil
+			}
+
+			file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+			if err != nil || file == nil {
+				return nil
+			}
+
+			fileDir := filepath.ToSlash(filepath.Dir(path))
+			pkg, ok := pkgs[fileDir]
+			if !ok {
+				pkgPath := fileDir
+				rel, rerr := filepath.Rel(dir, filepath.FromSlash(fileDir))
+				if rerr == nil {
+					rel = filepath.ToSlash(rel)
+					if rel == "." {
+						if modPath != "" {
+							pkgPath = modPath
+						}
+					} else {
+						if modPath != "" {
+							pkgPath = modPath + "/" + rel
+						} else {
+							pkgPath = rel
+						}
+					}
+				}
+
+				pkg = &packages.Package{
+					ID:      pkgPath,
+					PkgPath: pkgPath,
+					Name:    file.Name.Name,
+					Fset:    fset,
+				}
+				pkgs[fileDir] = pkg
+			}
+			pkg.Syntax = append(pkg.Syntax, file)
+			pkg.CompiledGoFiles = append(pkg.CompiledGoFiles, path)
+			return nil
+		})
+	}
+
+	for _, p := range patterns {
+		recursive := strings.HasSuffix(p, "/...") || p == "..."
+		base := p
+		if recursive {
+			base = strings.TrimSuffix(p, "/...")
+		}
+		
+		absBase := filepath.FromSlash(base)
+		if !filepath.IsAbs(absBase) {
+			absBase = filepath.Join(dir, absBase)
+		}
+		
+		if err := processDir(absBase, recursive); err != nil {
+			return nil, err
+		}
+	}
+
+	result := make([]*packages.Package, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		result = append(result, pkg)
+	}
+	return result, nil
 }

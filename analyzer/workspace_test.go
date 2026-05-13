@@ -272,3 +272,58 @@ func Hello() string { return "hi" }
 		t.Error("expected same instance after getting syntax only on already full program")
 	}
 }
+
+func TestLoadSyntaxOnlyFast(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create go.mod
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module my/fast/mod\n\ngo 1.23"), 0644)
+
+	// Create main.go
+	os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}"), 0644)
+
+	// Create a test file
+	os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\n\nimport \"testing\"\n\nfunc TestMain(t *testing.T) {}"), 0644)
+
+	// Create a vendor folder
+	os.MkdirAll(filepath.Join(dir, "vendor", "ignored"), 0755)
+	os.WriteFile(filepath.Join(dir, "vendor", "ignored", "skip.go"), []byte("package ignored\n\nfunc Skip() {}"), 0644)
+
+	// Create a subpackage
+	os.MkdirAll(filepath.Join(dir, "sub", "pkg"), 0755)
+	os.WriteFile(filepath.Join(dir, "sub", "pkg", "lib.go"), []byte("package pkg\n\nfunc Run() {}"), 0644)
+
+	pkgs, err := loadSyntaxOnlyFast(dir, []string{"./..."})
+	if err != nil {
+		t.Fatalf("loadSyntaxOnlyFast failed: %v", err)
+	}
+
+	// Should have two packages: my/fast/mod and my/fast/mod/sub/pkg
+	if len(pkgs) != 2 {
+		t.Fatalf("expected 2 packages, got %d", len(pkgs))
+	}
+
+	foundMain := false
+	foundSub := false
+
+	for _, pkg := range pkgs {
+		switch pkg.PkgPath {
+		case "my/fast/mod":
+			foundMain = true
+			if len(pkg.Syntax) != 1 {
+				t.Errorf("expected 1 syntax file for main, got %d", len(pkg.Syntax))
+			}
+		case "my/fast/mod/sub/pkg":
+			foundSub = true
+			if len(pkg.Syntax) != 1 {
+				t.Errorf("expected 1 syntax file for sub/pkg, got %d", len(pkg.Syntax))
+			}
+		default:
+			t.Errorf("unexpected package: %s", pkg.PkgPath)
+		}
+	}
+
+	if !foundMain || !foundSub {
+		t.Errorf("missing packages: main=%v, sub=%v", foundMain, foundSub)
+	}
+}
