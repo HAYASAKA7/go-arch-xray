@@ -20,7 +20,7 @@ func TestWorkspaceGetOrLoad_NormalizesFilesystemLikePattern(t *testing.T) {
 	ws := NewWorkspace()
 	dir := createFilesystemPatternModule(t, "pathpattern")
 
-	prog, err := ws.GetOrLoad(dir, "sub/services")
+	prog, err := ws.GetOrLoadSSA(dir, "sub/services")
 	if err != nil {
 		t.Fatalf("load with filesystem-like pattern failed: %v", err)
 	}
@@ -126,7 +126,7 @@ func Worker() {}
 `,
 	})
 
-	prog, err := ws.GetOrLoad(dir, "./...")
+	prog, err := ws.GetOrLoadSSA(dir, "./...")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func Hello() { fmt.Println("hi") }
 `,
 	})
 
-	prog, err := ws.GetOrLoad(dir, "./...")
+	prog, err := ws.GetOrLoadSSA(dir, "./...")
 	if err != nil {
 		t.Fatal(err)
 	}

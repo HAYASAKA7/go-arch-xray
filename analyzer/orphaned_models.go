@@ -72,7 +72,7 @@ func FindOrphanedDatabaseModels(ws *Workspace, dir, pattern string, opts Orphane
 
 // FindOrphanedDatabaseModelsWithOptions is the streaming/paginated variant.
 func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, oOpts OrphanedModelOptions, qOpts QueryOptions) (*OrphanedModelResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

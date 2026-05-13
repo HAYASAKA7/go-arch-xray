@@ -57,7 +57,7 @@ func TraceStructLifecycle(ws *Workspace, dir, pattern, structName string, opts L
 	}
 	opts = normalizeLifecycleOptions(opts)
 
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

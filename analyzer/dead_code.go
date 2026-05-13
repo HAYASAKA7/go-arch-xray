@@ -74,7 +74,7 @@ func FindDeadCode(ws *Workspace, dir, pattern string) (*DeadCodeResult, error) {
 
 // FindDeadCodeWithOptions is the streaming/paginated variant.
 func FindDeadCodeWithOptions(ws *Workspace, dir, pattern string, dcOpts DeadCodeOptions, opts QueryOptions) (*DeadCodeResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

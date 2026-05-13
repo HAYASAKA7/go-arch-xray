@@ -34,7 +34,7 @@ func findFunctionWithFallback(ws *Workspace, dir, pattern string, prog *LoadedPr
 		if fp == pattern {
 			continue
 		}
-		broadProg, berr := ws.GetOrLoad(dir, fp)
+		broadProg, berr := ws.GetOrLoadSSA(dir, fp)
 		if berr != nil {
 			continue
 		}
@@ -90,7 +90,7 @@ func AnalyzeCallHierarchyWithOptions(ws *Workspace, dir, pattern, functionName s
 		maxDepth = defaultCallHierarchyMaxDepth
 	}
 
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-05-13
+
+### Performance
+
+- **Parallel AST Extraction**: Read-only AST extraction phases (HTTP routes, gRPC endpoints, duplication fingerprints, complexity, and ORM models) now run concurrently using `sync.WaitGroup`, significantly reducing cold-start latency when a workspace is first loaded.
+- **Lazy SSA Initialization**: The server now defers building the expensive Static Single Assignment (SSA) program until explicitly requested by a tool. Lightweight tools (like boundary checks and dependency graphs) now run with dramatically lower memory footprints.
+- **TTL Cache Eviction**: Added an automated background sweeper to evict idle workspace caches after 15 minutes of inactivity, ensuring the server remains a polite background citizen and returns unused memory to the operating system.
+
 ## [0.6.2] - 2026-05-12
 
 ### Added
+
 - Added support for `bun` and `sqlc` ORM frameworks to the `find_orphaned_database_models` tool.
 - Introduced advanced ORM detection features:
   - Table name inference for common conventions (e.g., `snake`, `exact`).
@@ -18,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.1] - 2026-05-11
 
 ### Added
+
 - Added support for `ent` and `sqlx` to `find_orphaned_database_models` tool.
 
 ## [0.6.0] - 2026-05-11

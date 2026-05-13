@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/tools/go/callgraph"
@@ -26,6 +27,14 @@ const defaultCacheCapacity = 2
 
 var logger = log.New(os.Stderr, "[go-arch-xray] ", log.LstdFlags)
 
+type LoadMode int
+
+const (
+	LoadModeSyntax LoadMode = iota
+	LoadModeTypes
+	LoadModeSSA
+)
+
 // LoadedProgram is a cached snapshot of a Go workspace analyzed via go/packages
 // and golang.org/x/tools/go/ssa. SSA bodies are built only for the requested
 // (root) packages; transitive dependencies are kept as type-only entries to
@@ -37,10 +46,9 @@ type LoadedProgram struct {
 	RootPaths map[string]bool
 	Patterns  []string
 
-	// SyntaxOnly is true if this program was loaded without typechecking and SSA.
-	// It is used to serve lightweight queries like list_http_routes without
-	// allocating gigabytes of memory.
-	SyntaxOnly bool
+	// Mode indicates how much of the Go program was loaded.
+	// It is used to serve lightweight queries without allocating gigabytes of memory.
+	Mode LoadMode
 
 	// importLocs caches per-package import source locations extracted during
 	// load (before pkg.Syntax is cleared). Key: pkg.PkgPath → importPath → loc.
@@ -89,10 +97,11 @@ func (p *LoadedProgram) CallGraph() *callgraph.Graph {
 type cacheKey string
 
 type cacheEntry struct {
-	key      cacheKey
-	rootPath string
-	patterns []string
-	prog     *LoadedProgram
+	key        cacheKey
+	rootPath   string
+	patterns   []string
+	prog       *LoadedProgram
+	lastAccess time.Time
 }
 
 type CacheRecord struct {
@@ -101,6 +110,7 @@ type CacheRecord struct {
 	PackagePatterns []string `json:"package_patterns"`
 	PackagesLoaded  int      `json:"packages_loaded"`
 	FunctionsLoaded int      `json:"functions_loaded"`
+	LastAccess      string   `json:"last_access,omitempty"`
 }
 
 // OrmModel represents a database model discovered during load.
@@ -117,16 +127,58 @@ type OrmModel struct {
 type Workspace struct {
 	mu       sync.Mutex
 	capacity int
+	ttl      time.Duration
 	cache    map[cacheKey]*list.Element
 	order    *list.List // most-recently-used at the front
 	group    singleflight.Group
 }
 
 func NewWorkspace() *Workspace {
-	return &Workspace{
+	w := &Workspace{
 		capacity: defaultCacheCapacity,
+		ttl:      15 * time.Minute, // Default TTL
 		cache:    make(map[cacheKey]*list.Element),
 		order:    list.New(),
+	}
+	go w.sweeper()
+	return w
+}
+
+// SetTTL configures the time-to-live for idle cache entries. Set to 0 to disable.
+func (w *Workspace) SetTTL(d time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ttl = d
+}
+
+func (w *Workspace) sweeper() {
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		w.sweep()
+	}
+}
+
+func (w *Workspace) sweep() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.ttl <= 0 {
+		return
+	}
+
+	now := time.Now()
+	// Iterate from the back (least recently used)
+	for w.order.Len() > 0 {
+		elem := w.order.Back()
+		entry := elem.Value.(*cacheEntry)
+		if now.Sub(entry.lastAccess) > w.ttl {
+			delete(w.cache, entry.key)
+			w.order.Remove(elem)
+			logger.Printf("evicted idle cached program %s (inactive for %v)", entry.key, now.Sub(entry.lastAccess))
+		} else {
+			// Since order is sorted by MRU, if the back isn't expired, nothing before it is
+			break
+		}
 	}
 }
 
@@ -162,6 +214,7 @@ func (w *Workspace) Status() (size int, capacity int, entries []CacheRecord) {
 			PackagePatterns: append([]string(nil), entry.patterns...),
 			PackagesLoaded:  len(entry.prog.Packages),
 			FunctionsLoaded: len(entry.prog.SSAFuncs),
+			LastAccess:      entry.lastAccess.Format(time.RFC3339),
 		}
 		entries = append(entries, rec)
 	}
@@ -209,13 +262,26 @@ func makeCacheKey(dir string, patterns []string) cacheKey {
 }
 
 func (w *Workspace) GetOrLoad(dir, pattern string) (*LoadedProgram, error) {
+	return w.getOrLoad(dir, pattern, LoadModeTypes)
+}
+
+func (w *Workspace) GetOrLoadSyntaxOnly(dir, pattern string) (*LoadedProgram, error) {
+	return w.getOrLoad(dir, pattern, LoadModeSyntax)
+}
+
+func (w *Workspace) GetOrLoadSSA(dir, pattern string) (*LoadedProgram, error) {
+	return w.getOrLoad(dir, pattern, LoadModeSSA)
+}
+
+func (w *Workspace) getOrLoad(dir, pattern string, mode LoadMode) (*LoadedProgram, error) {
 	patterns := normalizePatternsForDir(dir, SplitPatterns(pattern))
 	key := makeCacheKey(dir, patterns)
 
 	w.mu.Lock()
 	if elem, ok := w.cache[key]; ok {
 		prog := elem.Value.(*cacheEntry).prog
-		if !prog.SyntaxOnly {
+		if prog.Mode >= mode {
+			elem.Value.(*cacheEntry).lastAccess = time.Now()
 			w.order.MoveToFront(elem)
 			w.mu.Unlock()
 			return prog, nil
@@ -223,55 +289,27 @@ func (w *Workspace) GetOrLoad(dir, pattern string) (*LoadedProgram, error) {
 	}
 	w.mu.Unlock()
 
-	v, err, _ := w.group.Do(string(key)+":full", func() (any, error) {
-		prog, err := loadProgram(dir, patterns, false)
+	v, err, _ := w.group.Do(fmt.Sprintf("%s:%d", key, mode), func() (any, error) {
+		prog, err := loadProgram(dir, patterns, mode)
 		if err != nil {
 			return nil, err
 		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
+		now := time.Now()
 		if elem, ok := w.cache[key]; ok {
-			// Replace existing (possibly SyntaxOnly) with full program
+			if elem.Value.(*cacheEntry).prog.Mode >= mode {
+				elem.Value.(*cacheEntry).lastAccess = now
+				w.order.MoveToFront(elem)
+				return elem.Value.(*cacheEntry).prog, nil
+			}
+			// Replace existing with upgraded program
 			elem.Value.(*cacheEntry).prog = prog
+			elem.Value.(*cacheEntry).lastAccess = now
 			w.order.MoveToFront(elem)
 			return prog, nil
 		}
-		elem := w.order.PushFront(&cacheEntry{key: key, rootPath: dir, patterns: append([]string(nil), patterns...), prog: prog})
-		w.cache[key] = elem
-		w.evictLocked()
-		return prog, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return v.(*LoadedProgram), nil
-}
-
-func (w *Workspace) GetOrLoadSyntaxOnly(dir, pattern string) (*LoadedProgram, error) {
-	patterns := normalizePatternsForDir(dir, SplitPatterns(pattern))
-	key := makeCacheKey(dir, patterns)
-
-	w.mu.Lock()
-	if elem, ok := w.cache[key]; ok {
-		w.order.MoveToFront(elem)
-		prog := elem.Value.(*cacheEntry).prog
-		w.mu.Unlock()
-		return prog, nil
-	}
-	w.mu.Unlock()
-
-	v, err, _ := w.group.Do(string(key)+":syntax", func() (any, error) {
-		prog, err := loadProgram(dir, patterns, true)
-		if err != nil {
-			return nil, err
-		}
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		if elem, ok := w.cache[key]; ok {
-			w.order.MoveToFront(elem)
-			return elem.Value.(*cacheEntry).prog, nil
-		}
-		elem := w.order.PushFront(&cacheEntry{key: key, rootPath: dir, patterns: append([]string(nil), patterns...), prog: prog})
+		elem := w.order.PushFront(&cacheEntry{key: key, rootPath: dir, patterns: append([]string(nil), patterns...), prog: prog, lastAccess: now})
 		w.cache[key] = elem
 		w.evictLocked()
 		return prog, nil
@@ -335,16 +373,16 @@ func (w *Workspace) Reload(dir, pattern string) (*LoadedProgram, error) {
 	return w.GetOrLoad(dir, pattern)
 }
 
-func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram, error) {
+func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, error) {
 	patterns = normalizePatternsForDir(dir, patterns)
 
-	mode := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax
-	if !syntaxOnly {
-		mode |= packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedModule | packages.NeedImports
+	pkgMode := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax
+	if mode >= LoadModeTypes {
+		pkgMode |= packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps | packages.NeedModule | packages.NeedImports
 	}
 
 	cfg := &packages.Config{
-		Mode:  mode,
+		Mode:  pkgMode,
 		Dir:   dir,
 		Tests: false,
 	}
@@ -367,7 +405,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		for _, e := range loadErrs {
 			logger.Printf("package error: %v", e)
 		}
-		if !syntaxOnly {
+		if mode >= LoadModeTypes {
 			hasTypes := false
 			for _, pkg := range pkgs {
 				if pkg.Types != nil {
@@ -392,7 +430,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		}
 	}
 
-	if !syntaxOnly {
+	if mode == LoadModeSSA {
 		// Build SSA bodies only for the requested (root) packages. Transitive
 		// dependencies are still represented in the SSA program as type-only
 		// entries so we can resolve cross-package types, but we never pay the
@@ -403,11 +441,6 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 			return nil, fmt.Errorf("ssa program could not be created (likely due to type errors above)")
 		}
 		prog.Build()
-
-		importLocsCache = make(map[string]map[string]importSourceLoc, len(pkgs))
-		for _, pkg := range pkgs {
-			importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
-		}
 
 		// Because we used ssautil.Packages (root-only build), AllFunctions
 		// already returns ~root SSA funcs only. Filter defensively to root
@@ -425,14 +458,47 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		}
 	}
 
+	if mode >= LoadModeTypes {
+		importLocsCache = make(map[string]map[string]importSourceLoc, len(pkgs))
+		for _, pkg := range pkgs {
+			importLocsCache[pkg.PkgPath] = extractImportLocsFromPkg(pkg)
+		}
+	}
+
 	// Capture import source locations and HTTP routes from syntax BEFORE
 	// clearing pkg.Syntax and trimming pkg.CompiledGoFiles. This eliminates
 	// the need to re-parse source files on every analysis call.
-	httpRoutesCache := extractRoutesFromSyntax(pkgs)
-	grpcCache := extractGRPCFromSyntax(pkgs)
-	methodFingerprintsCache := extractMethodFingerprintsFromSyntax(pkgs)
-	complexityMetricsCache := extractComplexityFromSyntax(pkgs)
-	ormModelsCache := extractOrmModelsFromSyntax(pkgs)
+	var httpRoutesCache []HTTPRoute
+	var grpcCache grpcExtraction
+	var methodFingerprintsCache []MethodFingerprint
+	var complexityMetricsCache []FunctionComplexity
+	var ormModelsCache []OrmModel
+
+	var wg sync.WaitGroup
+	wg.Add(5)
+
+	go func() {
+		defer wg.Done()
+		httpRoutesCache = extractRoutesFromSyntax(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		grpcCache = extractGRPCFromSyntax(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		methodFingerprintsCache = extractMethodFingerprintsFromSyntax(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		complexityMetricsCache = extractComplexityFromSyntax(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		ormModelsCache = extractOrmModelsFromSyntax(pkgs)
+	}()
+
+	wg.Wait()
 
 	// Drop syntax / type info / file listings from every reachable package
 	// to release the bulk of go/packages memory once SSA is built. The
@@ -465,7 +531,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		clear(pkg)
 	}
 
-	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v syntaxOnly=%v", len(pkgs), len(funcs), dir, patterns, syntaxOnly)
+	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v mode=%d", len(pkgs), len(funcs), dir, patterns, mode)
 
 	return &LoadedProgram{
 		Packages:           pkgs,
@@ -473,7 +539,7 @@ func loadProgram(dir string, patterns []string, syntaxOnly bool) (*LoadedProgram
 		SSAFuncs:           funcs,
 		RootPaths:          rootPaths,
 		Patterns:           patterns,
-		SyntaxOnly:         syntaxOnly,
+		Mode:               mode,
 		importLocs:         importLocsCache,
 		httpRoutes:         httpRoutesCache,
 		grpcEndpoints:      grpcCache.endpoints,

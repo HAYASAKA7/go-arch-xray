@@ -48,7 +48,7 @@ func ListEntrypoints(ws *Workspace, dir, pattern string) (*EntrypointsResult, er
 }
 
 func ListEntrypointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*EntrypointsResult, error) {
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}

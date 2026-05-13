@@ -31,7 +31,7 @@
 ### Workspace Management
 
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
-- `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count).
+- `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count, and last access time).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
 - `inspect_workspace_config`: Shows the repo config path, user-local config path, auto-detected `go.work`/`go.mod` defaults, and the effective config used by tools.
 - `suggest_workspace_config`: Returns a proposed `.go-arch-xray.yml` from `go.work`/`go.mod` discovery without writing files.

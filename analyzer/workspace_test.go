@@ -72,7 +72,7 @@ func TestWorkspaceGetOrLoad_HasSSAProgram(t *testing.T) {
 func Add(a, b int) int { return a + b }
 `)
 
-	prog, err := ws.GetOrLoad(dir, "./...")
+	prog, err := ws.GetOrLoadSSA(dir, "./...")
 	if err != nil {
 		t.Fatalf("load failed: %v", err)
 	}
@@ -241,7 +241,7 @@ func Hello() string { return "hi" }
 	if err != nil {
 		t.Fatalf("first load failed: %v", err)
 	}
-	if !prog1.SyntaxOnly {
+	if prog1.Mode != LoadModeSyntax {
 		t.Error("expected SyntaxOnly true")
 	}
 	if prog1.SSA != nil {
@@ -249,12 +249,12 @@ func Hello() string { return "hi" }
 	}
 
 	// Upgrade to full program
-	prog2, err := ws.GetOrLoad(dir, "./...")
+	prog2, err := ws.GetOrLoadSSA(dir, "./...")
 	if err != nil {
 		t.Fatalf("second load failed: %v", err)
 	}
-	if prog2.SyntaxOnly {
-		t.Error("expected SyntaxOnly false after upgrade")
+	if prog2.Mode == LoadModeSyntax {
+		t.Error("expected LoadModeSyntax false after upgrade")
 	}
 	if prog2.SSA == nil {
 		t.Error("expected non-nil SSA program after upgrade")
@@ -265,8 +265,8 @@ func Hello() string { return "hi" }
 	if err != nil {
 		t.Fatalf("third load failed: %v", err)
 	}
-	if prog3.SyntaxOnly {
-		t.Error("expected returned program to still be full (SyntaxOnly false)")
+	if prog3.Mode == LoadModeSyntax {
+		t.Error("expected returned program to still be full (LoadModeSyntax false)")
 	}
 	if prog3 != prog2 {
 		t.Error("expected same instance after getting syntax only on already full program")

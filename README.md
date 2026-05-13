@@ -1,6 +1,6 @@
 # Go Architecture X-Ray MCP
 
-Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs over stdio and keeps a process-scoped LRU cache (default 2 entries) of analyzed programs for the life of the MCP session.
+Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs locally over stdio and maintains a process-scoped, lazily-initialized LRU cache (default 2 entries) of analyzed programs. The server features an automated background sweeper that evicts idle caches after 15 minutes to minimize system memory footprint during the life of the MCP session.
 
 ## Features Overview
 

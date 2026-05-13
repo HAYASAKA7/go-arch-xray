@@ -37,7 +37,7 @@ func FindCallersWithOptions(ws *Workspace, dir, pattern, functionName string, ma
 		maxDepth = defaultCallersMaxDepth
 	}
 
-	prog, err := ws.GetOrLoad(dir, pattern)
+	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
