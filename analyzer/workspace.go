@@ -787,12 +787,12 @@ func loadSyntaxOnlyFast(dir string, patterns []string) ([]*packages.Package, err
 		if recursive {
 			base = strings.TrimSuffix(p, "/...")
 		}
-		
+
 		absBase := filepath.FromSlash(base)
 		if !filepath.IsAbs(absBase) {
 			absBase = filepath.Join(dir, absBase)
 		}
-		
+
 		if err := processDir(absBase, recursive); err != nil {
 			return nil, err
 		}
