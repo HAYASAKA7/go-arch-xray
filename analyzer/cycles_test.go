@@ -92,7 +92,7 @@ func TestDetectImportCycles_NoCycleInValidModule(t *testing.T) {
 		"domain/d.go": "package domain\n\nfunc Name() string { return \"domain\" }\n",
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := DetectImportCycles(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

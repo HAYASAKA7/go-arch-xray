@@ -26,7 +26,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	collected := streamCollect(t, func(cursor string) (any, []HTTPRoute, string, bool) {
 		r, err := ListHTTPRoutesWithOptions(ws, dir, "./...", QueryOptions{ChunkSize: 2, Cursor: cursor})
 		if err != nil {
@@ -59,7 +59,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	collected := streamCollect(t, func(cursor string) (any, []Entrypoint, string, bool) {
 		r, err := ListEntrypointsWithOptions(ws, dir, "./...", QueryOptions{ChunkSize: 2, Cursor: cursor})
 		if err != nil {
@@ -81,7 +81,7 @@ func TestStreaming_PackageDependenciesChunks(t *testing.T) {
 		"d/d.go":  "package d\n",
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	collected := streamCollect(t, func(cursor string) (any, []PackageDependency, string, bool) {
 		r, err := GetPackageDependenciesWithOptions(ws, dir, "./...", false, QueryOptions{ChunkSize: 2, Cursor: cursor})
 		if err != nil {

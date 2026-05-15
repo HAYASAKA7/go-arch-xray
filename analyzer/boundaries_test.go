@@ -1,134 +1,154 @@
 package analyzer
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestCheckArchitectureBoundaries_ForbidDirectImport(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_forbid", map[string]string{
-		"domain/d.go": "package domain\n\nfunc Name() string { return \"domain\" }\n",
-		"infra/i.go":  "package infra\n\nimport \"bound_forbid/domain\"\n\nfunc Run() string { return domain.Name() }\n",
-		"api/a.go":    "package api\n\nimport \"bound_forbid/domain\"\n\nfunc Get() string { return domain.Name() }\n",
-	})
-
-	ws := NewWorkspace()
-	rules := []BoundaryRule{
-		{Type: RuleForbid, From: "bound_forbid/infra", To: "bound_forbid/domain"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ViolationCount != 1 {
-		t.Fatalf("expected 1 violation, got %d: %+v", result.ViolationCount, result.Violations)
-	}
-	v := result.Violations[0]
-	if v.From != "bound_forbid/infra" {
-		t.Errorf("expected violation from bound_forbid/infra, got %s", v.From)
-	}
-	if v.Import != "bound_forbid/domain" {
-		t.Errorf("expected violation import bound_forbid/domain, got %s", v.Import)
-	}
-	if v.Rule != "forbid" {
-		t.Errorf("expected rule=forbid, got %s", v.Rule)
-	}
-}
-
-func TestCheckArchitectureBoundaries_ForbidPrefixPattern(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_forbid_prefix", map[string]string{
-		"internal/core/c.go": "package core\n\nfunc Core() string { return \"core\" }\n",
-		"internal/db/d.go":   "package db\n\nfunc DB() string { return \"db\" }\n",
-		"internal/api/a.go":  "package api\n\nimport (\n\t\"bound_forbid_prefix/internal/core\"\n\t\"bound_forbid_prefix/internal/db\"\n)\n\nfunc Run() string { return core.Core() + db.DB() }\n",
-	})
-
-	ws := NewWorkspace()
-	// api is forbidden from importing anything under internal/db/
-	rules := []BoundaryRule{
-		{Type: RuleForbid, From: "bound_forbid_prefix/internal/api", To: "bound_forbid_prefix/internal/db/"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ViolationCount != 1 {
-		t.Fatalf("expected 1 violation, got %d: %+v", result.ViolationCount, result.Violations)
-	}
-	if result.Violations[0].Import != "bound_forbid_prefix/internal/db" {
-		t.Errorf("expected db import as violation, got %s", result.Violations[0].Import)
-	}
-}
-
-func TestCheckArchitectureBoundaries_AllowOnlyViolation(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_allow_only", map[string]string{
-		"service/s.go": "package service\n\nfunc Svc() string { return \"svc\" }\n",
-		"db/d.go":      "package db\n\nfunc DB() string { return \"db\" }\n",
-		"api/a.go":     "package api\n\nimport (\n\t\"bound_allow_only/service\"\n\t\"bound_allow_only/db\"\n)\n\nfunc Handle() string { return service.Svc() + db.DB() }\n",
-	})
-
-	ws := NewWorkspace()
-	// api may only import service (not db)
-	rules := []BoundaryRule{
-		{Type: RuleAllowOnly, From: "bound_allow_only/api", To: "bound_allow_only/service"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ViolationCount != 1 {
-		t.Fatalf("expected 1 violation, got %d: %+v", result.ViolationCount, result.Violations)
-	}
-	if result.Violations[0].Import != "bound_allow_only/db" {
-		t.Errorf("expected db as violation, got %s", result.Violations[0].Import)
-	}
-}
-
-func TestCheckArchitectureBoundaries_AllowPrefixPermits(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_allow_prefix", map[string]string{
-		"internal/svc/s.go":  "package svc\n\nfunc Run() string { return \"svc\" }\n",
-		"internal/repo/r.go": "package repo\n\nfunc Load() string { return \"repo\" }\n",
-		"api/a.go":           "package api\n\nimport (\n\t\"bound_allow_prefix/internal/svc\"\n\t\"bound_allow_prefix/internal/repo\"\n)\n\nfunc Handle() string { return svc.Run() + repo.Load() }\n",
-	})
-
-	ws := NewWorkspace()
-	// api may only import packages with prefix bound_allow_prefix/internal/
-	rules := []BoundaryRule{
-		{Type: RuleAllowPrefix, From: "bound_allow_prefix/api", To: "bound_allow_prefix/internal/"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.ViolationCount != 0 {
-		t.Fatalf("expected 0 violations, got %d: %+v", result.ViolationCount, result.Violations)
-	}
-}
-
-func TestCheckArchitectureBoundaries_AllowPrefixViolation(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_allow_prefix_v", map[string]string{
-		"internal/svc/s.go": "package svc\n\nfunc Run() string { return \"svc\" }\n",
+func TestCheckArchitectureBoundaries_BatchedRules(t *testing.T) {
+	dir := createDependencyTestModule(t, "bound_rules", map[string]string{
+		"domain/d.go":       "package domain\n\nfunc Name() string { return \"domain\" }\n",
+		"infra/one/i.go":    "package one\n\nimport \"bound_rules/domain\"\n\nfunc Run() string { return domain.Name() }\n",
+		"infra/two/i.go":    "package two\n\nimport \"bound_rules/domain\"\n\nfunc Run() string { return domain.Name() }\n",
+		"infra/three/i.go":  "package three\n\nimport \"bound_rules/domain\"\n\nfunc Run() string { return domain.Name() }\n",
+		"api/a.go":          "package api\n\nimport (\n\t\"bound_rules/domain\"\n\t\"bound_rules/external\"\n\t\"bound_rules/internal/db\"\n\t\"bound_rules/internal/svc\"\n)\n\nfunc Get() string { return domain.Name() + external.Ext() + db.DB() + svc.Run() }\n",
 		"external/e.go":     "package external\n\nfunc Ext() string { return \"ext\" }\n",
-		"api/a.go":          "package api\n\nimport (\n\t\"bound_allow_prefix_v/internal/svc\"\n\t\"bound_allow_prefix_v/external\"\n)\n\nfunc Handle() string { return svc.Run() + external.Ext() }\n",
+		"internal/db/d.go":  "package db\n\nfunc DB() string { return \"db\" }\n",
+		"internal/svc/s.go": "package svc\n\nfunc Run() string { return \"svc\" }\n",
+		"stdlib/s.go":       "package stdlib\n\nimport \"fmt\"\n\nfunc Run() { fmt.Println(\"hi\") }\n",
 	})
 
-	ws := NewWorkspace()
-	rules := []BoundaryRule{
-		{Type: RuleAllowPrefix, From: "bound_allow_prefix_v/api", To: "bound_allow_prefix_v/internal/"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	ws := newTestWorkspace(t)
 
-	if result.ViolationCount != 1 {
-		t.Fatalf("expected 1 violation, got %d: %+v", result.ViolationCount, result.Violations)
-	}
-	if result.Violations[0].Import != "bound_allow_prefix_v/external" {
-		t.Errorf("expected external as violation, got %s", result.Violations[0].Import)
-	}
+	t.Run("forbid direct import", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleForbid, From: "bound_rules/infra/one", To: "bound_rules/domain"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ViolationCount != 1 {
+			t.Fatalf("expected 1 violation, got %d: %+v", result.ViolationCount, result.Violations)
+		}
+		v := result.Violations[0]
+		if v.From != "bound_rules/infra/one" {
+			t.Errorf("expected violation from bound_rules/infra/one, got %s", v.From)
+		}
+		if v.Import != "bound_rules/domain" {
+			t.Errorf("expected violation import bound_rules/domain, got %s", v.Import)
+		}
+		if v.Rule != "forbid" {
+			t.Errorf("expected rule=forbid, got %s", v.Rule)
+		}
+	})
+
+	t.Run("forbid prefix pattern", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleForbid, From: "bound_rules/api", To: "bound_rules/internal/db/"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ViolationCount != 1 {
+			t.Fatalf("expected 1 violation, got %d: %+v", result.ViolationCount, result.Violations)
+		}
+		if result.Violations[0].Import != "bound_rules/internal/db" {
+			t.Errorf("expected db import as violation, got %s", result.Violations[0].Import)
+		}
+	})
+
+	t.Run("allow only violation", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleAllowOnly, From: "bound_rules/api", To: "bound_rules/internal/svc"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ViolationCount != 3 {
+			t.Fatalf("expected 3 violations, got %d: %+v", result.ViolationCount, result.Violations)
+		}
+		if !hasBoundaryViolation(result, "bound_rules/api", "bound_rules/domain") {
+			t.Fatal("expected domain as allow_only violation")
+		}
+	})
+
+	t.Run("allow prefix permits", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleAllowPrefix, From: "bound_rules/api", To: "bound_rules/"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ViolationCount != 0 {
+			t.Fatalf("expected 0 violations, got %d: %+v", result.ViolationCount, result.Violations)
+		}
+	})
+
+	t.Run("allow prefix violation", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleAllowPrefix, From: "bound_rules/api", To: "bound_rules/internal/"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ViolationCount != 2 {
+			t.Fatalf("expected 2 violations, got %d: %+v", result.ViolationCount, result.Violations)
+		}
+		if !hasBoundaryViolation(result, "bound_rules/api", "bound_rules/external") {
+			t.Fatal("expected external as allow_prefix violation")
+		}
+	})
+
+	t.Run("location", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleForbid, From: "bound_rules/infra/one", To: "bound_rules/domain"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.ViolationCount != 1 {
+			t.Fatalf("expected 1 violation")
+		}
+		v := result.Violations[0]
+		if v.File == "" || v.Line == 0 {
+			t.Errorf("expected violation to have file/line location, got file=%q line=%d", v.File, v.Line)
+		}
+	})
+
+	t.Run("limit offset", func(t *testing.T) {
+		result, err := CheckArchitectureBoundariesWithOptions(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleForbid, From: "bound_rules/infra/", To: "bound_rules/domain"},
+		}, QueryOptions{
+			Limit:  1,
+			Offset: 1,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result.TotalBeforeTruncate != 3 {
+			t.Fatalf("expected 3 total violations before truncate, got %d", result.TotalBeforeTruncate)
+		}
+		if len(result.Violations) != 1 {
+			t.Fatalf("expected 1 violation due to limit, got %d", len(result.Violations))
+		}
+		if !result.Truncated {
+			t.Fatal("expected truncated to be true")
+		}
+		if result.Violations[0].From != "bound_rules/infra/three" {
+			t.Fatalf("expected bound_rules/infra/three at offset 1, got %s", result.Violations[0].From)
+		}
+	})
+
+	t.Run("stdlib imports not violated", func(t *testing.T) {
+		result, err := CheckArchitectureBoundaries(ws, dir, "./...", []BoundaryRule{
+			{Type: RuleAllowOnly, From: "bound_rules/stdlib", To: "bound_rules/domain"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		for _, v := range result.Violations {
+			if v.Import == "fmt" {
+				t.Fatalf("stdlib import fmt should not be a violation")
+			}
+		}
+	})
 }
 
 func TestCheckArchitectureBoundaries_NoRulesReturnsEmpty(t *testing.T) {
@@ -136,7 +156,7 @@ func TestCheckArchitectureBoundaries_NoRulesReturnsEmpty(t *testing.T) {
 		"main.go": "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hi\") }\n",
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := CheckArchitectureBoundaries(ws, dir, "./...", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -146,81 +166,11 @@ func TestCheckArchitectureBoundaries_NoRulesReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestCheckArchitectureBoundaries_StdlibImportsNotViolated(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_stdlib", map[string]string{
-		"app/a.go": "package app\n\nimport \"fmt\"\n\nfunc Run() { fmt.Println(\"hi\") }\n",
-	})
-
-	ws := NewWorkspace()
-	// allow_only with a non-stdlib target — stdlib should not count as violation
-	rules := []BoundaryRule{
-		{Type: RuleAllowOnly, From: "bound_stdlib/app", To: "bound_stdlib/domain"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// fmt is stdlib, so should not be a violation
+func hasBoundaryViolation(result *BoundaryResult, from, imp string) bool {
 	for _, v := range result.Violations {
-		if v.Import == "fmt" {
-			t.Fatalf("stdlib import fmt should not be a violation")
+		if v.From == from && v.Import == imp {
+			return true
 		}
 	}
-}
-
-func TestCheckArchitectureBoundaries_ViolationHasSourceLocation(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_loc", map[string]string{
-		"domain/d.go": "package domain\n\nfunc Name() string { return \"domain\" }\n",
-		"infra/i.go":  "package infra\n\nimport \"bound_loc/domain\"\n\nfunc Run() string { return domain.Name() }\n",
-	})
-
-	ws := NewWorkspace()
-	rules := []BoundaryRule{
-		{Type: RuleForbid, From: "bound_loc/infra", To: "bound_loc/domain"},
-	}
-	result, err := CheckArchitectureBoundaries(ws, dir, "./...", rules)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.ViolationCount != 1 {
-		t.Fatalf("expected 1 violation")
-	}
-	v := result.Violations[0]
-	if v.File == "" || v.Line == 0 {
-		t.Errorf("expected violation to have file/line location, got file=%q line=%d", v.File, v.Line)
-	}
-}
-
-func TestCheckArchitectureBoundariesWithOptions_AppliesLimitOffset(t *testing.T) {
-	dir := createDependencyTestModule(t, "bound_opts", map[string]string{
-		"domain/d.go":      "package domain\n\nfunc Name() string { return \"domain\" }\n",
-		"infra/one/i.go":   "package one\n\nimport \"bound_opts/domain\"\n\nfunc Run() string { return domain.Name() }\n",
-		"infra/two/i.go":   "package two\n\nimport \"bound_opts/domain\"\n\nfunc Run() string { return domain.Name() }\n",
-		"infra/three/i.go": "package three\n\nimport \"bound_opts/domain\"\n\nfunc Run() string { return domain.Name() }\n",
-	})
-
-	ws := NewWorkspace()
-	rules := []BoundaryRule{
-		{Type: RuleForbid, From: "bound_opts/infra/", To: "bound_opts/domain"},
-	}
-	result, err := CheckArchitectureBoundariesWithOptions(ws, dir, "./...", rules, QueryOptions{
-		Limit:  1,
-		Offset: 1,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.TotalBeforeTruncate != 3 {
-		t.Fatalf("expected 3 total violations before truncate, got %d", result.TotalBeforeTruncate)
-	}
-	if len(result.Violations) != 1 {
-		t.Fatalf("expected 1 violation due to limit, got %d", len(result.Violations))
-	}
-	if !result.Truncated {
-		t.Fatal("expected truncated to be true")
-	}
-	if result.Violations[0].From != "bound_opts/infra/three" {
-		t.Fatalf("expected bound_opts/infra/three at offset 1, got %s", result.Violations[0].From)
-	}
+	return false
 }

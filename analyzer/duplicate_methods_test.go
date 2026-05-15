@@ -27,7 +27,7 @@ func reckon() int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := FindDuplicateMethods(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -59,7 +59,7 @@ func TestFindDuplicateMethods_FiltersByMinBodyLines(t *testing.T) {
 		"a.go":    "package main\n\nfunc a() int { return 1 }\n",
 		"b.go":    "package main\n\nfunc b() int { return 1 }\n",
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := FindDuplicateMethodsWithOptions(ws, dir, "./...", DuplicateMethodsOptions{}, QueryOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -79,7 +79,7 @@ func TestFindDuplicateMethods_RespectsCustomMinBodyLines(t *testing.T) {
 		"a.go":    "package main\n\nfunc a() int { return 1 }\n",
 		"b.go":    "package main\n\nfunc b() int { return 1 }\n",
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := FindDuplicateMethodsWithOptions(ws, dir, "./...", DuplicateMethodsOptions{MinBodyLines: 1}, QueryOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -114,7 +114,7 @@ func b() string {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, _ := FindDuplicateMethods(ws, dir, "./...")
 	for _, g := range result.Groups {
 		names := []string{}
@@ -132,7 +132,7 @@ func TestFindDuplicateMethods_NotesPresent(t *testing.T) {
 
 func main() {}
 `)
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := FindDuplicateMethods(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -164,7 +164,7 @@ func reckon() int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, _ := FindDuplicateMethods(ws, dir, "./...")
 	for _, g := range result.Groups {
 		for _, l := range g.Locations {
@@ -213,7 +213,7 @@ func (b *B) Run() int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := FindDuplicateMethods(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -288,7 +288,7 @@ func c2() string {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := FindDuplicateMethodsWithOptions(ws, dir, "./...", DuplicateMethodsOptions{}, QueryOptions{ChunkSize: 1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -331,7 +331,7 @@ func reckon() int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, _ := FindDuplicateMethods(ws, dir, "./...")
 	checked := false
 	for _, g := range result.Groups {

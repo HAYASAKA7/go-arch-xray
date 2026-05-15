@@ -17,7 +17,7 @@ func TestSplitPatterns_DefaultsAndDeduplicates(t *testing.T) {
 }
 
 func TestWorkspaceGetOrLoad_NormalizesFilesystemLikePattern(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createFilesystemPatternModule(t, "pathpattern")
 
 	prog, err := ws.GetOrLoadSSA(dir, "sub/services")
@@ -34,7 +34,7 @@ func TestWorkspaceGetOrLoad_NormalizesFilesystemLikePattern(t *testing.T) {
 }
 
 func TestWorkspaceGetOrLoad_MultiplePatternsCacheKeyInvariantToOrder(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createMultiPatternModule(t, "multipat")
 
 	progA, err := ws.GetOrLoad(dir, "./api/...,./impl/...")
@@ -54,7 +54,7 @@ func TestWorkspaceGetOrLoad_MultiplePatternsCacheKeyInvariantToOrder(t *testing.
 }
 
 func TestWorkspaceGetOrLoad_LoadsAcrossMultiplePatterns(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createMultiPatternModule(t, "multipatload")
 
 	prog, err := ws.GetOrLoad(dir, "./api/...,./impl/...")
@@ -74,7 +74,7 @@ func TestWorkspaceGetOrLoad_LoadsAcrossMultiplePatterns(t *testing.T) {
 }
 
 func TestWorkspaceLRUEvictsLeastRecentlyUsed(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	ws.SetCapacity(2)
 
 	dir1 := createMultiPatternModule(t, "lru1")
@@ -117,7 +117,7 @@ func TestWorkspaceLRUEvictsLeastRecentlyUsed(t *testing.T) {
 }
 
 func TestLoadedProgramCallGraphCachedAcrossCalls(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createCallHierarchyTestModule(t, "chacache", map[string]string{
 		"main.go": `package main
 
@@ -138,7 +138,7 @@ func Worker() {}
 }
 
 func TestLoadedProgramOnlyContainsRootSSAFunctions(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createCallHierarchyTestModule(t, "rootonly", map[string]string{
 		"main.go": `package main
 

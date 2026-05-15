@@ -21,7 +21,7 @@ func Run(u *User) {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	first, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{
 		DedupeMode: "none",
 		MaxHops:    100,
@@ -88,7 +88,7 @@ func Run(u *User) { u.Name = "x" }
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	_, err := TraceStructLifecycle(ws, dir, "./...", "User", LifecycleOptions{
 		DedupeMode: "none",
 		MaxHops:    10,

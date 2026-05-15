@@ -24,7 +24,7 @@ func E() {}
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	first, err := AnalyzeCallHierarchyWithOptions(ws, dir, "./...", "Root", 3, QueryOptions{ChunkSize: 2})
 	if err != nil {
 		t.Fatalf("first chunk: %v", err)
@@ -89,7 +89,7 @@ func B() {}
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	_, err := AnalyzeCallHierarchyWithOptions(ws, dir, "./...", "Root", 3, QueryOptions{ChunkSize: 1, Cursor: "not-a-real-cursor"})
 	if err == nil {
 		t.Fatal("expected error for malformed cursor")
@@ -110,7 +110,7 @@ func C() {}
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	first, err := AnalyzeCallHierarchyWithOptions(ws, dir, "./...", "Root", 3, QueryOptions{ChunkSize: 1})
 	if err != nil {
 		t.Fatalf("first chunk: %v", err)

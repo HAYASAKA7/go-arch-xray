@@ -19,7 +19,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -68,7 +68,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -110,7 +110,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -138,7 +138,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -168,7 +168,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -198,7 +198,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutesWithOptions(ws, dir, "./...", QueryOptions{
 		Limit:  1,
 		Offset: 1,
@@ -247,7 +247,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -294,7 +294,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -337,7 +337,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListHTTPRoutes(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

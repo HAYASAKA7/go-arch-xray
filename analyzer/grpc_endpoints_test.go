@@ -70,7 +70,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListGRPCEndpoints(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -141,7 +141,7 @@ var _Greeter_serviceDesc = grpc.ServiceDesc{
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListGRPCEndpoints(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -210,7 +210,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ListGRPCEndpoints(ws, dir, "./...")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -270,7 +270,7 @@ func main() {
 `,
 	})
 
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	collected := streamCollect(t, func(cursor string) (any, []string, string, bool) {
 		result, err := ListGRPCEndpointsWithOptions(ws, dir, "./...", QueryOptions{ChunkSize: 2, Cursor: cursor})
 		if err != nil {

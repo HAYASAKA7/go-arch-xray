@@ -19,7 +19,7 @@
 
 - `get_interface_topology`: Finds structs that implement a target interface. Supports value and pointer receivers, embedding, package-qualified interface names, stdlib filtering, source locations, and context anchors.
 - `trace_struct_lifecycle`: Uses SSA to report struct instantiation, field mutation, and interface handoff points. Supports `dedupe_mode`, `max_hops`, and `summary` output controls.
-- `detect_concurrency_risks`: Heuristically flags struct fields mutated inside goroutines without visible mutex or `sync/atomic` protection.
+- `detect_concurrency_risks`: Uses bounded SSA access summaries, goroutine capture tracking, helper-call propagation, lockset analysis, and atomic awareness to report concurrent field access risks. It preserves precise memory roots where possible, reports lower-confidence risks for unknown roots/containers/unresolved dynamic calls, and returns `notes` when analysis precision is reduced.
 
 ### Code Quality & Refactor Signals
 

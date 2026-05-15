@@ -61,10 +61,10 @@ Call hierarchy and reachability analysis uses Class Hierarchy Analysis (CHA), wh
 
 ### Concurrency Risk Heuristics
 
-The `detect_concurrency_risks` tool uses static heuristics:
+The `detect_concurrency_risks` tool uses bounded SSA access summaries:
 
-- **False positives:** The analysis flags field mutations inside goroutines that lack visible mutex or `sync/atomic` protection. Some code may use higher-level synchronization (channels, atomic-free patterns, or external guarantees) that the analysis cannot see.
-- **False negatives:** The analysis only checks for explicit `sync.Mutex` / `sync.RWMutex` / `sync/atomic` patterns. Other synchronization primitives (channels, `sync.Map`, external locks) are not recognized.
+- **False positives:** The analysis remains conservative around unknown roots, containers, reflection, CGO, unsafe, and unresolved calls.
+- **False negatives:** Higher-level synchronization primitives (channels, `sync.Map`, external locks) are still not modeled directly.
 - Use the risk results as a signal for manual review, not as proof of a race condition.
 
 ### SSA Scope

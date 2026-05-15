@@ -157,3 +157,23 @@ func BenchmarkHandleComputeComplexityMetrics(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkHandleDetectConcurrencyRisks measures warm-cache concurrency detection latency.
+func BenchmarkHandleDetectConcurrencyRisks(b *testing.B) {
+	dir := createMainTestModule(b, "benchconcurrency", map[string]string{
+		"main.go": "package main\n\nimport \"sync\"\n\ntype State struct { mu sync.Mutex; Count int }\n\nfunc main() { go func(s *State) { s.mu.Lock(); s.Count++; s.mu.Unlock() }(&State{}) }\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, _, err := handleDetectConcurrencyRisks(context.Background(), nil, ConcurrencyRisksInput{RootPath: dir}); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := handleDetectConcurrencyRisks(context.Background(), nil, ConcurrencyRisksInput{RootPath: dir})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

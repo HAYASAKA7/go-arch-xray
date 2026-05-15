@@ -9,6 +9,7 @@ import (
 
 func TestMain(m *testing.M) {
 	os.Setenv(userConfigEnv, "off")
+	os.Setenv("GOTOOLCHAIN", "local")
 	os.Exit(m.Run())
 }
 

@@ -3,11 +3,12 @@ package analyzer
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
 func TestWorkspaceGetOrLoad_ReturnsCachedProgram(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 
 	dir := createTestModule(t, "testmod", `package main
 
@@ -33,7 +34,7 @@ func Hello() string { return "hello" }
 }
 
 func TestWorkspaceGetOrLoad_DifferentPatterns(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 
 	dir := createTestModule(t, "testmod2", `package main
 
@@ -56,7 +57,7 @@ func World() string { return "world" }
 }
 
 func TestWorkspaceGetOrLoad_InvalidPattern(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 
 	_, err := ws.GetOrLoad("/nonexistent/path", "./...")
 	if err == nil {
@@ -65,7 +66,7 @@ func TestWorkspaceGetOrLoad_InvalidPattern(t *testing.T) {
 }
 
 func TestWorkspaceGetOrLoad_HasSSAProgram(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 
 	dir := createTestModule(t, "testmod3", `package main
 
@@ -84,8 +85,42 @@ func Add(a, b int) int { return a + b }
 	}
 }
 
+func TestLoadedProgramConcurrencySummaries_ConcurrentAccess(t *testing.T) {
+	ws := newTestWorkspace(t)
+
+	dir := createTestModule(t, "summaryconcurrent", `package main
+
+type State struct {
+	Count int
+}
+
+func Run(s *State) {
+	go func() {
+		s.Count++
+	}()
+}
+`)
+
+	prog, err := ws.GetOrLoadSSA(dir, "./...")
+	if err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if summaries := prog.ConcurrencySummaries(); len(summaries) == 0 {
+				t.Error("expected concurrency summaries")
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func TestWorkspaceReload_InvalidatesCache(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 
 	dir := createTestModule(t, "testmod4", `package main
 
@@ -110,7 +145,7 @@ func Foo() {}
 }
 
 func TestWorkspaceReload_RefreshesChangedSource(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createTestModule(t, "reloadsource", `package main
 
 func Version() string { return "v1" }
@@ -138,7 +173,7 @@ func Version() string { return "v2" }
 }
 
 func TestWorkspaceStatusAndClear(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	dir := createTestModule(t, "statusclear", `package main
 
 func Hello() string { return "hi" }
@@ -230,7 +265,7 @@ use ./pkg/lib
 }
 
 func TestWorkspaceGetOrLoadSyntaxOnly(t *testing.T) {
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 
 	dir := createTestModule(t, "syntaxonly", `package main
 

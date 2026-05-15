@@ -146,7 +146,7 @@ func complex(x int) int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ComputeComplexityMetricsWithOptions(ws, dir, "./...", ComplexityOptions{
 		MinCognitive:    2,
 		IncludePackages: true,
@@ -200,7 +200,7 @@ func deep(x int) int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ComputeComplexityMetricsWithOptions(ws, dir, "./...", ComplexityOptions{IncludePackages: true}, QueryOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -234,7 +234,7 @@ func dense(a, b, c, d int) int {
 }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ComputeComplexityMetricsWithOptions(ws, dir, "./...", ComplexityOptions{
 		MinHalsteadVolume: 10,
 		SortBy:            complexitySortMaintainability,
@@ -278,7 +278,7 @@ func b() { if true { return } }
 func c() { if true { return } }
 `,
 	})
-	ws := NewWorkspace()
+	ws := newTestWorkspace(t)
 	result, err := ComputeComplexityMetricsWithOptions(ws, dir, "./...", ComplexityOptions{}, QueryOptions{ChunkSize: 2})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

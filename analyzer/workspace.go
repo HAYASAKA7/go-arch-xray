@@ -79,6 +79,11 @@ type LoadedProgram struct {
 	// without re-parsing source files.
 	complexityMetrics []FunctionComplexity
 
+	// concurrencySummaries caches per-function access summaries captured lazily
+	// for DetectConcurrencyRisks and related analyses.
+	concurrencyOnce      sync.Once
+	concurrencySummaries map[*ssa.Function]FunctionAccessSummary
+
 	// gormModels caches structs with GORM tags captured during load
 	// (before pkg.Syntax is cleared). Used by FindOrphanedDatabaseModels
 	// without re-parsing source files.
@@ -95,6 +100,13 @@ func (p *LoadedProgram) CallGraph() *callgraph.Graph {
 		p.chaGraph = cha.CallGraph(p.SSA)
 	})
 	return p.chaGraph
+}
+
+func (p *LoadedProgram) ConcurrencySummaries() map[*ssa.Function]FunctionAccessSummary {
+	p.concurrencyOnce.Do(func() {
+		p.concurrencySummaries = BuildFunctionAccessSummaries(p)
+	})
+	return p.concurrencySummaries
 }
 
 type cacheKey string
@@ -128,12 +140,14 @@ type OrmModel struct {
 // Workspace is a process-scoped LRU cache of LoadedProgram instances guarded
 // by a mutex. Concurrent loads of the same key are coalesced via singleflight.
 type Workspace struct {
-	mu       sync.Mutex
-	capacity int
-	ttl      time.Duration
-	cache    map[cacheKey]*list.Element
-	order    *list.List // most-recently-used at the front
-	group    singleflight.Group
+	mu        sync.Mutex
+	capacity  int
+	ttl       time.Duration
+	cache     map[cacheKey]*list.Element
+	order     *list.List // most-recently-used at the front
+	group     singleflight.Group
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewWorkspace() *Workspace {
@@ -142,9 +156,19 @@ func NewWorkspace() *Workspace {
 		ttl:      15 * time.Minute, // Default TTL
 		cache:    make(map[cacheKey]*list.Element),
 		order:    list.New(),
+		done:     make(chan struct{}),
 	}
 	go w.sweeper()
 	return w
+}
+
+// Close stops the background cache sweeper. It is mainly useful for tests and
+// short-lived embedded uses; server processes can keep the workspace open for
+// their lifetime.
+func (w *Workspace) Close() {
+	w.closeOnce.Do(func() {
+		close(w.done)
+	})
 }
 
 // SetTTL configures the time-to-live for idle cache entries. Set to 0 to disable.
@@ -156,8 +180,14 @@ func (w *Workspace) SetTTL(d time.Duration) {
 
 func (w *Workspace) sweeper() {
 	ticker := time.NewTicker(5 * time.Minute)
-	for range ticker.C {
-		w.sweep()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			w.sweep()
+		case <-w.done:
+			return
+		}
 	}
 }
 
@@ -545,19 +575,20 @@ func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, 
 	logger.Printf("loaded %d packages, %d root functions from %s patterns=%v mode=%d", len(pkgs), len(funcs), dir, patterns, mode)
 
 	return &LoadedProgram{
-		Packages:           pkgs,
-		SSA:                prog,
-		SSAFuncs:           funcs,
-		RootPaths:          rootPaths,
-		Patterns:           patterns,
-		Mode:               mode,
-		importLocs:         importLocsCache,
-		httpRoutes:         httpRoutesCache,
-		grpcEndpoints:      grpcCache.endpoints,
-		grpcRegistrations:  grpcCache.registrations,
-		methodFingerprints: methodFingerprintsCache,
-		complexityMetrics:  complexityMetricsCache,
-		ormModels:          ormModelsCache,
+		Packages:             pkgs,
+		SSA:                  prog,
+		SSAFuncs:             funcs,
+		RootPaths:            rootPaths,
+		Patterns:             patterns,
+		Mode:                 mode,
+		importLocs:           importLocsCache,
+		httpRoutes:           httpRoutesCache,
+		grpcEndpoints:        grpcCache.endpoints,
+		grpcRegistrations:    grpcCache.registrations,
+		methodFingerprints:   methodFingerprintsCache,
+		complexityMetrics:    complexityMetricsCache,
+		ormModels:            ormModelsCache,
+		concurrencySummaries: nil,
 	}, nil
 }
 
