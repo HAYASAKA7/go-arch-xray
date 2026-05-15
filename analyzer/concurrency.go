@@ -9,8 +9,19 @@ import (
 )
 
 type ConcurrencyRiskResult struct {
-	Risks []ConcurrencyRisk `json:"risks"`
-	Notes []string          `json:"notes,omitempty"`
+	Risks   []ConcurrencyRisk       `json:"risks"`
+	Summary *ConcurrencyRiskSummary `json:"summary,omitempty"`
+	Notes   []string                `json:"notes,omitempty"`
+}
+
+type ConcurrencyRiskOptions struct {
+	IncludeDiagnostics bool
+}
+
+type ConcurrencyRiskSummary struct {
+	TotalRisks             int `json:"total_risks"`
+	UnresolvedDynamicCalls int `json:"unresolved_dynamic_calls"`
+	UnknownEffects         int `json:"unknown_effects"`
 }
 
 type ConcurrencyRisk struct {
@@ -24,7 +35,7 @@ type ConcurrencyRisk struct {
 	Anchor    string `json:"context_anchor,omitempty"`
 }
 
-func DetectConcurrencyRisks(ws *Workspace, dir, pattern string) (*ConcurrencyRiskResult, error) {
+func DetectConcurrencyRisks(ws *Workspace, dir, pattern string, opts ConcurrencyRiskOptions) (*ConcurrencyRiskResult, error) {
 	prog, err := ws.GetOrLoadSSA(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
@@ -33,8 +44,14 @@ func DetectConcurrencyRisks(ws *Workspace, dir, pattern string) (*ConcurrencyRis
 	summaries := prog.ConcurrencySummaries()
 	accesses, notes := ExpandConcurrentAccessesWithNotes(prog, summaries)
 	result := risksFromAccesses(accesses)
-	result.Notes = append(result.Notes, notes...)
-	result.Notes = append(result.Notes, concurrencySummaryNotes(summaries)...)
+	result.Summary = buildConcurrencyRiskSummary(summaries, accesses)
+	result.Notes = append(result.Notes, summarizeConcurrencyNotes(notes)...)
+	if opts.IncludeDiagnostics {
+		result.Notes = append(result.Notes, notes...)
+		result.Notes = append(result.Notes, concurrencySummaryNotes(summaries)...)
+	} else {
+		result.Notes = append(result.Notes, concurrencySummaryNotes(summaries)...)
+	}
 
 	sort.Slice(result.Risks, func(i, j int) bool {
 		if result.Risks[i].File != result.Risks[j].File {
@@ -50,6 +67,53 @@ func DetectConcurrencyRisks(ws *Workspace, dir, pattern string) (*ConcurrencyRis
 	})
 
 	return result, nil
+}
+
+func buildConcurrencyRiskSummary(summaries map[*ssa.Function]FunctionAccessSummary, accesses []MemoryAccess) *ConcurrencyRiskSummary {
+	if len(summaries) == 0 && len(accesses) == 0 {
+		return &ConcurrencyRiskSummary{}
+	}
+	summary := &ConcurrencyRiskSummary{
+		TotalRisks: len(accesses),
+	}
+	for _, fnSummary := range summaries {
+		for _, note := range fnSummary.Notes {
+			if strings.Contains(note, "unresolved dynamic call") {
+				summary.UnresolvedDynamicCalls++
+			}
+			if strings.Contains(note, "unknown effects") {
+				summary.UnknownEffects++
+			}
+		}
+	}
+	return summary
+}
+
+func summarizeConcurrencyNotes(notes []string) []string {
+	if len(notes) == 0 {
+		return nil
+	}
+	counts := map[string]int{}
+	for _, note := range notes {
+		switch {
+		case strings.Contains(note, "unresolved dynamic goroutine call"):
+			counts["unresolved dynamic goroutine call"]++
+		case strings.Contains(note, "unresolved dynamic call"):
+			counts["unresolved dynamic call"]++
+		default:
+			counts[note]++
+		}
+	}
+	out := make([]string, 0, len(counts))
+	for kind, count := range counts {
+		if count == 1 {
+			out = append(out, kind)
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s (%d occurrences)", kind, count))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func concurrencySummaryNotes(summaries map[*ssa.Function]FunctionAccessSummary) []string {

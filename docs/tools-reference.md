@@ -19,13 +19,13 @@
 
 - `get_interface_topology`: Finds structs that implement a target interface. Supports value and pointer receivers, embedding, package-qualified interface names, stdlib filtering, source locations, and context anchors.
 - `trace_struct_lifecycle`: Uses SSA to report struct instantiation, field mutation, and interface handoff points. Supports `dedupe_mode`, `max_hops`, and `summary` output controls.
-- `detect_concurrency_risks`: Uses bounded SSA access summaries, goroutine capture tracking, helper-call propagation, lockset analysis, and atomic awareness to report concurrent field access risks. It preserves precise memory roots where possible, reports lower-confidence risks for unknown roots/containers/unresolved dynamic calls, and returns `notes` when analysis precision is reduced.
+- `detect_concurrency_risks`: Uses bounded SSA access summaries, goroutine capture tracking, helper-call propagation, lockset analysis, and atomic awareness to report concurrent field access risks. It preserves precise memory roots where possible, reports lower-confidence risks for unknown roots/containers/unresolved dynamic calls, summarizes repeated diagnostics by default, and can include raw diagnostics with `include_diagnostics: true`.
 
 ### Code Quality & Refactor Signals
 
-- `find_dead_code`: Reports unexported functions and methods that are unreferenced or unreachable from any program entrypoint via the CHA call graph. Pass `include_exported: true` to also audit exported symbols (useful for internal modules). Result includes caveats — CHA cannot see reflection, plugins, cgo, or `//go:linkname`.
-- `find_duplicate_methods`: Groups together functions and methods whose signature and normalized body match across the workspace. Bodies are hashed after whitespace normalization and comment stripping. Tune `min_body_lines` (default 3) to control the noise floor.
-- `find_orphaned_database_models`: Detects database models that are defined but never initialized or used in queries. Currently supports GORM (`gorm:"..."` tagged structs), ent, sqlx, bun, and sqlc. Reports models with zero database-related references including queries, migrations, and ORM operations. Includes advanced features like table name inference and cross-referencing with migration files to reduce false positives. Use for refactoring cleanup, schema hygiene, and audit trail of unused models.
+- `find_dead_code`: Reports precision-first dead-code candidates. Default `mode: "precision"` returns high-confidence unreferenced functions and methods with confidence, actionability, and evidence fields; `mode: "audit"` returns the broader static inventory with labels, including unreachable caller-chain findings. Pass `include_exported: true` to also audit exported symbols (useful for internal modules). Use `scope_package_pattern` to report only a package subtree while keeping broader workspace reachability loaded. Result includes caveats - CHA cannot see reflection, plugins, cgo, or `//go:linkname`.
+- `find_duplicate_methods`: Groups together functions and methods whose signature and normalized body match across the workspace. Bodies are hashed after whitespace normalization and comment stripping. Tune `min_body_lines` (default 3) to control the noise floor. Use `scope_package_pattern` to report duplicate groups that touch a package subtree while still loading the broader workspace.
+- `find_orphaned_database_models`: Detects database models that are defined but never initialized or used in queries. Currently supports GORM (`gorm:"..."` tagged structs), ent, sqlx, bun, and sqlc. Reports models with confidence, actionability, evidence, and summary metadata so clients can distinguish deletion candidates from verify-first findings. Includes table name inference and cross-referencing with migration files to reduce false positives. Use `scope_package_pattern` to report only models in the package subtree under review.
 - `compute_complexity_metrics`: Reports per-function cyclomatic complexity, cognitive complexity, body lines, max nesting, Halstead metrics, and `maintainability_index`. Use it before refactors, during code review, for onboarding, and when prioritizing tests. Use `min_cyclomatic`, `min_cognitive`, `min_halstead_volume`, `max_maintainability_index`, and `sort_by` to focus results; set `include_packages: true` for package-level debt scans. Prefer `sort_by: "halstead_volume"` or `"halstead_effort"` for dense expression/operator-heavy code, and `sort_by: "maintainability"` to review lowest maintainability scores first. Complexity, Halstead, and maintainability metrics are structural ranking signals, not proof of performance, security, or correctness problems.
 
 ### Workspace Management
@@ -47,6 +47,10 @@ Most tools accept:
 - `root_path`: Root directory of the Go project. Defaults to the server working directory.
 - `package_pattern`: Single Go package pattern. Also accepts a comma-separated list. Defaults to `./...`.
 - `package_patterns`: Array of Go package patterns. Merged with `package_pattern` (deduplicated). Use this for multi-module / multi-subtree scans in one request.
+
+Candidate-report tools also accept:
+
+- `scope_package_pattern`: Narrows reported candidates to packages matching this pattern while still loading the broader workspace from `package_pattern` / `package_patterns`. Supported by `find_dead_code`, `find_duplicate_methods`, and `find_orphaned_database_models`. Use this when an AI client is reviewing one package, such as `./pkg/sync/...`, but needs cross-package references from `./...` to avoid local-only false positives.
 
 High-volume tools also accept:
 
@@ -148,6 +152,17 @@ Example `find_call_path` input:
   "to_function": "db.Query",
   "max_depth": 8,
   "max_paths": 5
+}
+```
+
+Example scoped dead-code scan:
+
+```json
+{
+  "root_path": "D:\\Projects\\ExampleGoProject",
+  "package_pattern": "./...",
+  "scope_package_pattern": "./pkg/sync/...",
+  "mode": "precision"
 }
 ```
 

@@ -26,23 +26,28 @@ const (
 
 // OrphanedModel is a database model that appears unused.
 type OrphanedModel struct {
-	Name         string              `json:"name"`
-	Package      string              `json:"package"`
-	File         string              `json:"file"`
-	Line         int                 `json:"line"`
-	Anchor       string              `json:"context_anchor,omitempty"`
-	ORMFramework string              `json:"orm_framework"`
-	Reason       OrphanedModelReason `json:"reason"`
-	Notes        string              `json:"notes,omitempty"`
+	Name          string              `json:"name"`
+	Package       string              `json:"package"`
+	File          string              `json:"file"`
+	Line          int                 `json:"line"`
+	Anchor        string              `json:"context_anchor,omitempty"`
+	ORMFramework  string              `json:"orm_framework"`
+	Reason        OrphanedModelReason `json:"reason"`
+	Confidence    string              `json:"confidence,omitempty"`
+	Actionability string              `json:"actionability,omitempty"`
+	Evidence      []string            `json:"evidence,omitempty"`
+	Notes         string              `json:"notes,omitempty"`
 }
 
 // OrphanedModelResult is returned by FindOrphanedDatabaseModels.
 type OrphanedModelResult struct {
-	Models       []OrphanedModel `json:"models"`
-	Total        int             `json:"total"`
-	ORMFramework string          `json:"orm_framework"`
-	Scanned      int             `json:"scanned_models"`
-	Notes        []string        `json:"notes,omitempty"`
+	Models       []OrphanedModel       `json:"models"`
+	Total        int                   `json:"total"`
+	ORMFramework string                `json:"orm_framework"`
+	Scanned      int                   `json:"scanned_models"`
+	ScopePattern string                `json:"scope_pattern,omitempty"`
+	Summary      *OrphanedModelSummary `json:"summary,omitempty"`
+	Notes        []string              `json:"notes,omitempty"`
 
 	Offset              int    `json:"offset,omitempty"`
 	Limit               int    `json:"limit,omitempty"`
@@ -54,10 +59,18 @@ type OrphanedModelResult struct {
 	Truncated           bool   `json:"truncated"`
 }
 
+type OrphanedModelSummary struct {
+	Total        int            `json:"total"`
+	Returned     int            `json:"returned"`
+	ByReason     map[string]int `json:"by_reason,omitempty"`
+	ByConfidence map[string]int `json:"by_confidence,omitempty"`
+}
+
 // OrphanedModelOptions tunes the orphaned model scan.
 type OrphanedModelOptions struct {
 	// ORMFramework specifies which ORM to detect.
 	ORMFramework string
+	ScopePattern string
 	// MigrationDirs specifies where to look for migration files.
 	MigrationDirs []string
 	// TableInference specifies how to infer table names (e.g. "snake_plural").
@@ -76,6 +89,7 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
+	scopePkgs := selectedPackageSet(prog, dir, SplitPatterns(oOpts.ScopePattern))
 
 	// Default to GORM if not specified
 	framework := oOpts.ORMFramework
@@ -105,6 +119,9 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 		if err != nil {
 			continue // Skip if we can't find the type
 		}
+		if len(scopePkgs) > 0 && !scopePkgs[om.Pkg] {
+			continue
+		}
 		detailed = append(detailed, detailedModel{
 			OrmModel: om,
 			SSAType:  typ,
@@ -113,6 +130,10 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 
 	// Check each model for database usage
 	orphaned := make([]OrphanedModel, 0, len(detailed)/4) // Assume ~25% are orphaned
+	summary := &OrphanedModelSummary{
+		ByReason:     make(map[string]int),
+		ByConfidence: make(map[string]int),
+	}
 
 	// Read migrations if configured
 	migrationFilesText := readMigrationFiles(dir, oOpts.MigrationDirs)
@@ -140,21 +161,31 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 		default:
 			continue // Model is used, not orphaned
 		}
+		confidence, actionability := orphanedModelMetadata(reason)
 
 		if len(migrationFilesText) > 0 && !inMigrations && reason != OrphanedNoOrmUsage {
 			notes += fmt.Sprintf(" (also not found in migrations as %q)", tableName)
 		}
 
 		orphaned = append(orphaned, OrphanedModel{
-			Name:         model.Name,
-			Package:      model.Pkg,
-			File:         model.File,
-			Line:         model.Line,
-			Anchor:       contextAnchor(model.File, model.Line, model.Name),
-			ORMFramework: model.Framework,
-			Reason:       reason,
-			Notes:        notes,
+			Name:          model.Name,
+			Package:       model.Pkg,
+			File:          model.File,
+			Line:          model.Line,
+			Anchor:        contextAnchor(model.File, model.Line, model.Name),
+			ORMFramework:  model.Framework,
+			Reason:        reason,
+			Confidence:    confidence,
+			Actionability: actionability,
+			Evidence: []string{
+				fmt.Sprintf("references=%d", refs),
+				fmt.Sprintf("orm_usage=%t", ormUsage),
+				fmt.Sprintf("in_migrations=%t", inMigrations),
+			},
+			Notes: notes,
 		})
+		summary.ByReason[string(reason)]++
+		summary.ByConfidence[confidence]++
 	}
 
 	sort.Slice(orphaned, func(i, j int) bool {
@@ -169,6 +200,8 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 		Total:        len(orphaned),
 		ORMFramework: framework,
 		Scanned:      len(cachedModels),
+		ScopePattern: oOpts.ScopePattern,
+		Summary:      summary,
 		Notes: []string{
 			"Models detected by GORM tag presence (gorm:\"...\") only.",
 			"Reflection-based patterns and raw SQL queries are not detected.",
@@ -188,8 +221,21 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 	if qOpts.ChunkSize > 0 {
 		result.ChunkSize = clampChunkSize(qOpts.ChunkSize)
 	}
+	summary.Total = len(orphaned)
+	summary.Returned = len(result.Models)
 
 	return result, nil
+}
+
+func orphanedModelMetadata(reason OrphanedModelReason) (confidence, actionability string) {
+	switch reason {
+	case OrphanedNoReferences:
+		return "high", "candidate_for_delete"
+	case OrphanedNoOrmUsage:
+		return "medium", "verify_before_delete"
+	default:
+		return "unknown", "review"
+	}
 }
 
 func orphanedModelKey(m OrphanedModel) string {

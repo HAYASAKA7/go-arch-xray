@@ -142,6 +142,39 @@ func main() {}
 	}
 }
 
+func TestFindDuplicateMethods_ScopePatternFiltersSiblingPackages(t *testing.T) {
+	dir := createDependencyTestModule(t, "dup_scope", map[string]string{
+		"sync/a.go": `package sync
+
+func A() int { return 1 }
+func B() int { return 1 }
+`,
+		"webdav/b.go": `package webdav
+
+func C() int { return 1 }
+func D() int { return 1 }
+`,
+	})
+	ws := newTestWorkspace(t)
+	result, err := FindDuplicateMethodsWithOptions(ws, dir, "./...", DuplicateMethodsOptions{
+		MinBodyLines: 1,
+		ScopePattern: "./sync/...",
+	}, QueryOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, group := range result.Groups {
+		for _, loc := range group.Locations {
+			if strings.Contains(loc.Package, "webdav") {
+				t.Fatalf("expected scope filter to exclude sibling package, got %#v", loc)
+			}
+		}
+	}
+	if result.ScopePattern != "./sync/..." {
+		t.Fatalf("expected scope_pattern to round-trip, got %q", result.ScopePattern)
+	}
+}
+
 func TestFindDuplicateMethods_LocationsHaveAnchors(t *testing.T) {
 	dir := createDependencyTestModule(t, "dup_anchors", map[string]string{
 		"main.go": "package main\n\nfunc main() { _ = compute(); _ = reckon() }\n",

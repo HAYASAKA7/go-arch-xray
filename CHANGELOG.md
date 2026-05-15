@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.6] - 2026-05-15
+
+### Added
+
+- Added `scope_package_pattern` to `find_dead_code`, `find_duplicate_methods`, and `find_orphaned_database_models` so clients can load a broad workspace for accurate cross-package reachability while reporting only the package subtree under review.
+- Added confidence, actionability, evidence, mode, scope, and summary metadata to precision-oriented dead-code results, with `mode: "precision"` as the default and `mode: "audit"` for full static inventories.
+- Added confidence, actionability, evidence, scope, and summary metadata to orphaned database model findings.
+
+### Changed
+
+- Reduced dead-code false positives by treating registered callback roots such as MCP tool handlers as live.
+- Summarized repeated concurrency diagnostics by default; callers can request raw diagnostics with `include_diagnostics`.
+- Updated documentation to guide AI clients toward scoped candidate reporting instead of broad, noisy repository-wide result lists.
+
 ## [0.6.5] - 2026-05-13
 
 ### Changed

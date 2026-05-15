@@ -7,8 +7,24 @@ Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codeb
 - **Call Graph & Reachability:** Analyze call hierarchies and trace execution paths across your Go codebase.
 - **Import Graph & Architecture:** Map package dependencies, detect cycles, and enforce architectural boundaries.
 - **Struct Analysis:** Discover interface implementations, trace struct lifecycles, and identify concurrency risks with bounded SSA access summaries, lockset tracking, and atomic awareness.
-- **Code Quality & Refactor Signals:** Detect dead code, find duplicate methods, identify orphaned database models, and compute complexity metrics (cyclomatic, cognitive, Halstead).
+- **Code Quality & Refactor Signals:** Detect precision-first dead-code candidates, find duplicate methods, identify orphaned database models, and compute complexity metrics (cyclomatic, cognitive, Halstead).
 - **Workspace Management:** Dynamically reload workspaces, manage caches, inspect configurations, and list entrypoints (HTTP routes, gRPC endpoints, etc.).
+
+## Focused Candidate Reports
+
+For broad workspaces, load enough packages for accurate analysis with `package_pattern`
+or `package_patterns`, then narrow noisy candidate-style reports with
+`scope_package_pattern`. This is supported by `find_dead_code`,
+`find_duplicate_methods`, and `find_orphaned_database_models`.
+
+```json
+{
+  "root_path": "D:\\Projects\\ExampleGoProject",
+  "package_pattern": "./...",
+  "scope_package_pattern": "./pkg/sync/...",
+  "mode": "precision"
+}
+```
 
 ## Install From GitHub Releases
 

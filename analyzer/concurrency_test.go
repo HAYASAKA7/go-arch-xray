@@ -211,7 +211,7 @@ func RunDirectReceiverOnlyInterface(m ReceiverOnlyMutator) {
 	})
 
 	ws := newTestWorkspace(t)
-	result, err := DetectConcurrencyRisks(ws, dir, "./...")
+	result, err := DetectConcurrencyRisks(ws, dir, "./...", ConcurrencyRiskOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -262,6 +262,24 @@ func RunDirectReceiverOnlyInterface(m ReceiverOnlyMutator) {
 	t.Run("direct receiver-only interface go call note", func(t *testing.T) {
 		if !hasConcurrencyNote(result, "unresolved dynamic goroutine call") {
 			t.Fatalf("expected note for unresolved receiver-only direct go call: %#v", result)
+		}
+	})
+
+	t.Run("notes are summarized", func(t *testing.T) {
+		kindCount := 0
+		for _, note := range result.Notes {
+			if strings.Contains(note, "unresolved dynamic call") {
+				kindCount++
+			}
+		}
+		if kindCount > 4 {
+			t.Fatalf("expected aggregated unresolved dynamic call notes, got %d note(s): %#v", kindCount, result.Notes)
+		}
+		if result.Summary == nil {
+			t.Fatal("expected non-nil summary")
+		}
+		if result.Summary.UnresolvedDynamicCalls == 0 {
+			t.Fatalf("expected summary to record unresolved dynamic calls, got %#v", result.Summary)
 		}
 	})
 }

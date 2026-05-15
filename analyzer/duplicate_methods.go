@@ -195,6 +195,7 @@ type DuplicateMethodsResult struct {
 	Groups       []DuplicateMethodGroup `json:"groups"`
 	Total        int                    `json:"total_groups"`
 	MinBodyLines int                    `json:"min_body_lines"`
+	ScopePattern string                 `json:"scope_pattern,omitempty"`
 	Notes        []string               `json:"notes,omitempty"`
 
 	Offset              int    `json:"offset,omitempty"`
@@ -212,6 +213,7 @@ type DuplicateMethodsOptions struct {
 	// MinBodyLines filters out short bodies that are likely to collide
 	// trivially (e.g. one-line getters). Default 3 when zero.
 	MinBodyLines int
+	ScopePattern string
 }
 
 // FindDuplicateMethods reports groups of functions/methods whose body and
@@ -229,6 +231,7 @@ func FindDuplicateMethodsWithOptions(ws *Workspace, dir, pattern string, dmOpts 
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
+	scopePkgs := selectedPackageSet(prog, dir, SplitPatterns(dmOpts.ScopePattern))
 
 	minLines := dmOpts.MinBodyLines
 	if minLines <= 0 {
@@ -242,6 +245,9 @@ func FindDuplicateMethodsWithOptions(ws *Workspace, dir, pattern string, dmOpts 
 	buckets := make(map[groupKey][]MethodFingerprint, 64)
 	for _, fp := range prog.methodFingerprints {
 		if fp.BodyHash == "" || fp.BodyLines < minLines {
+			continue
+		}
+		if len(scopePkgs) > 0 && !scopePkgs[fp.Package] {
 			continue
 		}
 		k := groupKey{signature: fp.Signature, hash: fp.BodyHash}
@@ -297,6 +303,7 @@ func FindDuplicateMethodsWithOptions(ws *Workspace, dir, pattern string, dmOpts 
 		Groups:       groups,
 		Total:        len(groups),
 		MinBodyLines: minLines,
+		ScopePattern: dmOpts.ScopePattern,
 		Notes: []string{
 			"Bodies are compared after whitespace normalization and comment stripping; identifier renames still count as distinct.",
 			"Generic type parameter differences do NOT split groups — a duplicate body across two type parameters is reported once.",

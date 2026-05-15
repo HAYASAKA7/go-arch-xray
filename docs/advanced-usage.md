@@ -77,11 +77,12 @@ The Static Single Assignment (SSA) program is built only for explicitly loaded r
 
 ### Dead Code Detection
 
-The `find_dead_code` tool reports unexported symbols with zero inbound callers or unreachable entrypoint chains:
+The `find_dead_code` tool defaults to `mode: "precision"`, which reports high-confidence unreferenced symbols with confidence, actionability, and evidence fields. Use `mode: "audit"` when you want the broader static inventory, including lower-confidence unreachable entrypoint chains:
 
 - **Reflection:** Functions called via `reflect` are invisible and may be incorrectly flagged as dead.
 - **Plugin patterns:** Code loaded at runtime or called through plugin interfaces will appear unreferenced.
 - **Test-only usage:** If a function is only called from `*_test.go` files (which are not loaded into the analysis program), it may be flagged as dead.
+- **Scope:** Use `scope_package_pattern` to report only the package subtree under review while loading a broader `package_pattern` for cross-package reachability.
 
 Verify before deleting any symbols reported by `find_dead_code`.
 

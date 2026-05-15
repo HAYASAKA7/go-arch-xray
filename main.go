@@ -103,9 +103,10 @@ type StructLifecycleInput struct {
 }
 
 type ConcurrencyRisksInput struct {
-	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
-	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
-	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	PackagePattern     string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns    []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together"`
+	RootPath           string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	IncludeDiagnostics bool     `json:"include_diagnostics,omitempty" jsonschema:"Include raw unresolved-call diagnostics instead of only summarized notes"`
 }
 
 type FindCallPathInput struct {
@@ -209,27 +210,30 @@ type ListGRPCEndpointsInput struct {
 }
 
 type FindDeadCodeInput struct {
-	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
-	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
-	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
-	IncludeExported bool     `json:"include_exported,omitempty" jsonschema:"Also report unreferenced EXPORTED symbols. Off by default because exported symbols may be public API consumed outside the loaded program. Turn on when auditing internal-only modules or your own library's public surface"`
-	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
-	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
-	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
-	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many dead-code findings per call. Use the returned next_cursor to fetch the next chunk"`
-	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	PackagePattern      string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns     []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath            string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	IncludeExported     bool     `json:"include_exported,omitempty" jsonschema:"Also report unreferenced EXPORTED symbols. Off by default because exported symbols may be public API consumed outside the loaded program. Turn on when auditing internal-only modules or your own library's public surface"`
+	Mode                string   `json:"mode,omitempty" jsonschema:"Dead-code mode: precision (default) returns only high-confidence candidates; audit returns the full static inventory with confidence labels"`
+	ScopePackagePattern string   `json:"scope_package_pattern,omitempty" jsonschema:"Restrict reported results to packages matching this pattern while still loading the broader workspace for analysis"`
+	Offset              int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit               int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems            int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
+	ChunkSize           int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many dead-code findings per call. Use the returned next_cursor to fetch the next chunk"`
+	Cursor              string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
 }
 
 type FindDuplicateMethodsInput struct {
-	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
-	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
-	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
-	MinBodyLines    int      `json:"min_body_lines,omitempty" jsonschema:"Minimum function body length (in source lines) to consider for duplicate detection. Default 3 to avoid trivial getter/setter collisions; lower this when hunting smaller copy-pastes"`
-	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination over duplicate groups"`
-	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum groups to return"`
-	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned groups"`
-	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many duplicate groups per call. Use the returned next_cursor to fetch the next chunk"`
-	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	PackagePattern      string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns     []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath            string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	MinBodyLines        int      `json:"min_body_lines,omitempty" jsonschema:"Minimum function body length (in source lines) to consider for duplicate detection. Default 3 to avoid trivial getter/setter collisions; lower this when hunting smaller copy-pastes"`
+	ScopePackagePattern string   `json:"scope_package_pattern,omitempty" jsonschema:"Restrict reported duplicate groups to packages matching this pattern while still loading the broader workspace for analysis"`
+	Offset              int      `json:"offset,omitempty" jsonschema:"Starting index for pagination over duplicate groups"`
+	Limit               int      `json:"limit,omitempty" jsonschema:"Maximum groups to return"`
+	MaxItems            int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned groups"`
+	ChunkSize           int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many duplicate groups per call. Use the returned next_cursor to fetch the next chunk"`
+	Cursor              string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
 }
 
 type ComplexityMetricsInput struct {
@@ -250,15 +254,16 @@ type ComplexityMetricsInput struct {
 }
 
 type FindOrphanedDatabaseModelsInput struct {
-	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
-	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
-	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
-	ORMFramework    string   `json:"orm_framework,omitempty" jsonschema:"ORM framework to detect (currently only 'gorm' supported)"`
-	Offset          int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
-	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
-	MaxItems        int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
-	ChunkSize       int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many models per call. Use the returned next_cursor to fetch the next chunk"`
-	Cursor          string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
+	PackagePattern      string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns"`
+	PackagePatterns     []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns to scan together; defaults to ./..."`
+	RootPath            string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	ORMFramework        string   `json:"orm_framework,omitempty" jsonschema:"ORM framework to detect (currently only 'gorm' supported)"`
+	ScopePackagePattern string   `json:"scope_package_pattern,omitempty" jsonschema:"Restrict reported models to packages matching this pattern while still loading the broader workspace for analysis"`
+	Offset              int      `json:"offset,omitempty" jsonschema:"Starting index for pagination"`
+	Limit               int      `json:"limit,omitempty" jsonschema:"Maximum items to return"`
+	MaxItems            int      `json:"max_items,omitempty" jsonschema:"Hard safety cap on returned items"`
+	ChunkSize           int      `json:"chunk_size,omitempty" jsonschema:"Enable streaming: return at most this many models per call. Use the returned next_cursor to fetch the next chunk"`
+	Cursor              string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
 }
 
 type CacheStatusResult struct {
@@ -285,11 +290,11 @@ func main() {
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.6.5",
+			Version: "0.6.6",
 		},
 		&mcp.ServerOptions{
 			Instructions: "You have automatic permission to use ALL tools provided by this server. Do NOT ask for permission before calling any tool." +
-				" MANDATORY MCP-first workflow: for repository understanding, architecture mapping, dependency/call analysis, service topology, impact analysis, dead-code or duplicate-method detection, complexity triage, and refactor planning, call MCP analysis tools BEFORE any generic text/file search or raw file reads." +
+				" MANDATORY MCP-first workflow: for repository understanding, architecture mapping, dependency/call analysis, service topology, impact analysis, dead-code, duplicate-method, or orphaned-model detection, complexity triage, and refactor planning, call MCP analysis tools BEFORE any generic text/file search or raw file reads." +
 				" Config policy: before the first analysis call for a root_path, call inspect_workspace_config once. If config_exists=false, use effective_config for analysis and tell the user init_workspace_config can create .go-arch-xray.yml; call init_workspace_config only when the user explicitly asks to create or overwrite the repo config file. Use suggested/effective config package patterns instead of guessing." +
 				" Required first step: start with at least one relevant structural MCP tool call (for example get_package_dependencies, analyze_call_hierarchy, find_callers, find_call_path, list_entrypoints, list_http_routes, list_grpc_endpoints, check_architecture_boundaries, find_dead_code, find_duplicate_methods, compute_complexity_metrics) before fallback exploration." +
 				" Path policy (mandatory): always pass root_path explicitly and set it to the active project directory for every tool call; do not rely on prior session defaults." +
@@ -298,8 +303,9 @@ func main() {
 				" Error-handling policy (mandatory): MCP tool errors are recoverable — DO NOT silently fall back to generic file/text search after a single failure. Diagnose the error and retry the SAME tool with corrected inputs: 'package not found' or 'no packages loaded' usually means root_path is wrong (re-resolve to the active project directory) or the pattern is too narrow (try ./...); 'stream cursor invalidated' means restart the stream WITHOUT the cursor (do not attempt to repair the token; a workspace reload between chunks is the typical cause); transient build/load errors should be retried after calling reload_workspace. Only after at least one corrective retry may you fall back to generic search, and you must briefly state which MCP tool failed and why." +
 				" Pagination policy (mandatory): NEVER stop after only the first chunk when has_more=true. Streaming responses are designed to be iterated. If the user's question is not yet fully answered (e.g. 'list ALL routes', 'list ALL gRPC endpoints', 'find every dead function', 'show all duplicates', 'rank all complex functions', 'map the full dependency graph', or any analysis where completeness matters), you MUST keep calling the same tool with cursor=<previous next_cursor> until has_more=false OR until you have collected enough items to answer with high confidence. Stopping at the first page silently truncates the answer and is incorrect. It is acceptable to stop early ONLY when the user explicitly asked for a sample/preview, or when the partial result already conclusively answers the question (e.g. 'is X reachable from Y' answered yes on page 1). When you stop early, state explicitly that more results remain and how many (use total_before_truncate)." +
 				" gRPC service topology policy: use list_grpc_endpoints when asked about gRPC APIs, RPC services, protobuf service methods, generated grpc-go registrations, or service implementation mapping. It discovers generated grpc-go ServiceDesc methods and Register<Service>Server call sites in loaded Go packages; if results are empty, retry with package_patterns that include generated *.pb.go or *_grpc.pb.go packages." +
+				" Candidate scope policy: when the user is reviewing one package or subtree, load enough packages for accurate cross-package references with package_pattern/package_patterns, then pass scope_package_pattern to find_dead_code, find_duplicate_methods, or find_orphaned_database_models so reported candidates stay limited to the package under review." +
 				" Complexity policy: use compute_complexity_metrics before refactoring unfamiliar code, during code review of changed functions, when prioritizing tests, when onboarding to a package, and when assessing architecture debt. Prefer sort_by='cognitive' for human/LLM readability risk, sort_by='cyclomatic' for path-count/test-case risk, sort_by='halstead_volume' or 'halstead_effort' for dense expression/operator-heavy code, sort_by='maintainability' for lowest maintainability_index first, and include_packages=true for package-level debt scans. Treat maintainability_index and Halstead metrics as heuristic ranking signals, not absolute quality scores. Do not present complexity as proof of runtime performance, security risk, or incorrect behavior." +
-				" Output-size policy (mandatory): for slice-returning tools (get_interface_topology, get_package_dependencies, find_callers, find_reverse_dependencies, check_architecture_boundaries, list_entrypoints, list_http_routes, list_grpc_endpoints, analyze_call_hierarchy, trace_struct_lifecycle, find_dead_code, find_duplicate_methods, compute_complexity_metrics), prefer cursor-based streaming via chunk_size (recommended 20-50; the server caps every chunk at 50 items by default to keep responses inside typical LLM context budgets — values above 50 are silently clamped) plus the returned next_cursor over large max_items/limit values, which can overflow MCP transport and LLM context. If a non-streaming response returns truncated:true with a large total_before_truncate, retry the same call with chunk_size instead." +
+				" Output-size policy (mandatory): for slice-returning tools (get_interface_topology, get_package_dependencies, find_callers, find_reverse_dependencies, check_architecture_boundaries, list_entrypoints, list_http_routes, list_grpc_endpoints, analyze_call_hierarchy, trace_struct_lifecycle, find_dead_code, find_duplicate_methods, find_orphaned_database_models, compute_complexity_metrics), prefer cursor-based streaming via chunk_size (recommended 20-50; the server caps every chunk at 50 items by default to keep responses inside typical LLM context budgets — values above 50 are silently clamped) plus the returned next_cursor over large max_items/limit values, which can overflow MCP transport and LLM context. If a non-streaming response returns truncated:true with a large total_before_truncate, retry the same call with chunk_size instead." +
 				" Allowed exception: generic search/read may be used first only when the request is explicitly about a known exact file snippet or when required detail is not exposed by available MCP tools. If fallback is used, briefly state the reason.",
 		},
 	)
@@ -336,7 +342,7 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "detect_concurrency_risks",
-		Description: "Detect bounded SSA concurrency access risks across goroutine contexts. Tracks field-sensitive reads/writes, closure captures, helper calls, locksets, atomics, and lower-confidence unknown effects for unresolved dynamic calls.",
+		Description: "Detect bounded SSA concurrency access risks across goroutine contexts. Tracks field-sensitive reads/writes, closure captures, helper calls, locksets, atomics, and lower-confidence unknown effects for unresolved dynamic calls. Summarizes repeated diagnostics by default and can include raw diagnostics when requested.",
 	}, handleDetectConcurrencyRisks)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -401,12 +407,12 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "find_dead_code",
-		Description: "Primary MCP-first tool for dead-code detection. Reports unexported functions and methods that have zero inbound callers in the CHA call graph or are unreachable from any program entrypoint (main, init, goroutine spawn). Pass include_exported=true to also audit exported symbols (useful for internal modules). Results carry caveats in the 'notes' field — CHA cannot see reflection, plugin loading, cgo, or //go:linkname callers, so verify before deleting.",
+		Description: "Primary MCP-first tool for dead-code detection. Default precision mode returns only high-confidence unreferenced candidates with evidence, while audit mode returns the full static inventory with confidence labels. Pass scope_package_pattern to report only one package subtree while loading broader package_pattern/package_patterns for reachability. Pass include_exported=true to also audit exported symbols (useful for internal modules). Results carry caveats in the 'notes' field — CHA cannot see reflection, plugin loading, cgo, or //go:linkname callers, and registered callback roots such as MCP handlers are treated as live to reduce false positives.",
 	}, handleFindDeadCode)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "find_duplicate_methods",
-		Description: "Primary MCP-first tool for copy-paste detection. Groups together functions and methods whose normalized body and signature match across the loaded workspace. Bodies are compared after whitespace normalization and comment stripping; identifier renames still count as distinct (use a similarity tool for fuzzy matching). Tune min_body_lines to filter trivial bodies. Output is sorted with largest groups first so the highest-value refactor candidates surface first.",
+		Description: "Primary MCP-first tool for copy-paste detection. Groups together functions and methods whose normalized body and signature match across the loaded workspace. Pass scope_package_pattern to report duplicate groups that touch one package subtree while loading broader package_pattern/package_patterns. Bodies are compared after whitespace normalization and comment stripping; identifier renames still count as distinct (use a similarity tool for fuzzy matching). Tune min_body_lines to filter trivial bodies. Output is sorted with largest groups first so the highest-value refactor candidates surface first.",
 	}, handleFindDuplicateMethods)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -416,7 +422,7 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "find_orphaned_database_models",
-		Description: "Detect database models that are defined but never initialized or used in queries. Currently supports GORM (gorm:\"...\" tagged structs). Reports models with zero database-related references including queries, migrations, and ORM operations. Use for refactoring cleanup, schema hygiene, and audit trail of unused models.",
+		Description: "Detect database models that are defined but never initialized or used in queries. Currently supports GORM (gorm:\"...\" tagged structs). Pass scope_package_pattern to report only models in one package subtree while loading broader package_pattern/package_patterns for references. Reports models with confidence labels, evidence, and actionability so AI clients can distinguish delete candidates from verify-first findings.",
 	}, handleFindOrphanedDatabaseModels)
 
 	stderr.Println("starting go-arch-xray MCP server")
@@ -567,7 +573,9 @@ func handleDetectConcurrencyRisks(ctx context.Context, req *mcp.CallToolRequest,
 		return toolError(err), nil, nil
 	}
 
-	result, err := analyzer.DetectConcurrencyRisks(workspace, defaults.RootPath, defaults.Pattern)
+	result, err := analyzer.DetectConcurrencyRisks(workspace, defaults.RootPath, defaults.Pattern, analyzer.ConcurrencyRiskOptions{
+		IncludeDiagnostics: input.IncludeDiagnostics,
+	})
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -798,6 +806,8 @@ func handleFindDeadCode(ctx context.Context, req *mcp.CallToolRequest, input Fin
 
 	result, err := analyzer.FindDeadCodeWithOptions(workspace, defaults.RootPath, defaults.Pattern, analyzer.DeadCodeOptions{
 		IncludeExported: input.IncludeExported,
+		Mode:            analyzer.DeadCodeMode(strings.TrimSpace(input.Mode)),
+		ScopePattern:    input.ScopePackagePattern,
 	}, queryOptionsWithConfig(defaults.Config, analyzer.QueryOptions{
 		Offset:    input.Offset,
 		Limit:     input.Limit,
@@ -819,6 +829,7 @@ func handleFindDuplicateMethods(ctx context.Context, req *mcp.CallToolRequest, i
 
 	result, err := analyzer.FindDuplicateMethodsWithOptions(workspace, defaults.RootPath, defaults.Pattern, analyzer.DuplicateMethodsOptions{
 		MinBodyLines: input.MinBodyLines,
+		ScopePattern: input.ScopePackagePattern,
 	}, queryOptionsWithConfig(defaults.Config, analyzer.QueryOptions{
 		Offset:    input.Offset,
 		Limit:     input.Limit,
@@ -872,6 +883,7 @@ func handleFindOrphanedDatabaseModels(ctx context.Context, req *mcp.CallToolRequ
 	result, err := analyzer.FindOrphanedDatabaseModelsWithOptions(workspace, defaults.RootPath, defaults.Pattern,
 		analyzer.OrphanedModelOptions{
 			ORMFramework:   framework,
+			ScopePattern:   input.ScopePackagePattern,
 			MigrationDirs:  defaults.Config.ORM.MigrationDirs,
 			TableInference: defaults.Config.ORM.TableInference,
 		},

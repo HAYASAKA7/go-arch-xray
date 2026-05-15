@@ -1,14 +1,20 @@
 package analyzer
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestFindDeadCode_BatchedScenarios(t *testing.T) {
-	dir := createTestModule(t, "dc_batched", `package main
+	dir := createTestModuleFiles(t, "dc_batched", map[string]string{
+		"main.go": `package main
+
+import "dc_batched/mcp"
 
 func main() {
+	mcp.AddTool(nil, nil, handleTool)
 	used()
 	go worker()
 }
@@ -24,12 +30,20 @@ func deadHere() {}
 func deadCaller() { deadTarget() }
 func deadTarget() {}
 
+func handleTool() { helperTool() }
+func helperTool() {}
+
 func worker() { helper() }
 func helper() {}
 
 type Server struct{}
 func (s *Server) Start() { _ = 1 }
-`)
+`,
+		"mcp/mcp.go": `package mcp
+
+func AddTool(server any, tool any, handler func()) {}
+`,
+	})
 	ws := newTestWorkspace(t)
 	result, err := FindDeadCode(ws, dir, "./...")
 	if err != nil {
@@ -52,6 +66,15 @@ func (s *Server) Start() { _ = 1 }
 	t.Run("live function not reported", func(t *testing.T) {
 		if fn := findDeadFunction(result, ".used"); fn != nil {
 			t.Fatalf("live function 'used' wrongly reported as dead: %+v", fn)
+		}
+	})
+
+	t.Run("callback-registered handler not reported", func(t *testing.T) {
+		if fn := findDeadFunction(result, ".handleTool"); fn != nil {
+			t.Fatalf("callback-registered handler wrongly reported as dead: %+v", fn)
+		}
+		if fn := findDeadFunction(result, ".helperTool"); fn != nil {
+			t.Fatalf("callback helper wrongly reported as dead: %+v", fn)
 		}
 	})
 
@@ -85,11 +108,8 @@ func (s *Server) Start() { _ = 1 }
 
 	t.Run("unreachable from entrypoint", func(t *testing.T) {
 		fn := findDeadFunction(result, ".deadTarget")
-		if fn == nil {
-			t.Fatalf("expected deadTarget in report, got: %+v", result.Functions)
-		}
-		if fn.Kind != DeadCodeUnreachable {
-			t.Errorf("expected kind=unreachable_from_entrypoint, got %s", fn.Kind)
+		if fn != nil {
+			t.Fatalf("unreachable helper chain should be hidden in precision mode, got: %+v", fn)
 		}
 	})
 
@@ -102,15 +122,31 @@ func (s *Server) Start() { _ = 1 }
 		}
 	})
 
-	r2, err := FindDeadCodeWithOptions(ws, dir, "./...", DeadCodeOptions{IncludeExported: true}, QueryOptions{})
+	audit, err := FindDeadCodeWithOptions(ws, dir, "./...", DeadCodeOptions{IncludeExported: true, Mode: DeadCodeAuditMode}, QueryOptions{})
 	if err != nil {
-		t.Fatalf("unexpected include_exported error: %v", err)
+		t.Fatalf("unexpected audit error: %v", err)
 	}
 
-	t.Run("include exported reports exported function", func(t *testing.T) {
-		fn := findDeadFunction(r2, ".ExportedUnused")
+	t.Run("audit mode reports unreachable chain", func(t *testing.T) {
+		fn := findDeadFunction(audit, ".deadTarget")
 		if fn == nil {
-			t.Fatalf("expected ExportedUnused when include_exported=true, got: %+v", r2.Functions)
+			t.Fatalf("expected deadTarget in audit report, got: %+v", audit.Functions)
+		}
+		if fn.Kind != DeadCodeUnreachable {
+			t.Errorf("expected kind=unreachable_from_entrypoint, got %s", fn.Kind)
+		}
+		if fn.Confidence != "medium" {
+			t.Errorf("expected confidence=medium, got %s", fn.Confidence)
+		}
+		if fn.Actionability != "verify_before_delete" {
+			t.Errorf("expected actionability=verify_before_delete, got %s", fn.Actionability)
+		}
+	})
+
+	t.Run("include exported reports exported function", func(t *testing.T) {
+		fn := findDeadFunction(audit, ".ExportedUnused")
+		if fn == nil {
+			t.Fatalf("expected ExportedUnused when include_exported=true, got: %+v", audit.Functions)
 		}
 		if !fn.Exported {
 			t.Error("expected exported=true")
@@ -118,14 +154,49 @@ func (s *Server) Start() { _ = 1 }
 	})
 
 	t.Run("include exported reports pointer receiver method", func(t *testing.T) {
-		fn := findDeadFunction(r2, ".Start")
+		fn := findDeadFunction(audit, ".Start")
 		if fn == nil {
-			t.Fatalf("expected *Server.Start in include_exported report, got: %+v", r2.Functions)
+			t.Fatalf("expected *Server.Start in audit report, got: %+v", audit.Functions)
 		}
 		if !fn.Exported {
 			t.Errorf("expected exported=true for *Server.Start, got false")
 		}
 	})
+}
+
+func TestFindDeadCode_ScopePatternFiltersSiblingPackages(t *testing.T) {
+	dir := createTestModuleFiles(t, "dc_scope", map[string]string{
+		"sync/sync.go": `package sync
+
+func main() {
+	used()
+}
+
+func used() {}
+func localDead() {}
+`,
+		"webdav/webdav.go": `package webdav
+
+func helper() {}
+func deadNeighbor() {}
+`,
+	})
+	ws := newTestWorkspace(t)
+	result, err := FindDeadCodeWithOptions(ws, dir, "./...", DeadCodeOptions{
+		Mode:         DeadCodePrecisionMode,
+		ScopePattern: "./sync/...",
+	}, QueryOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, fn := range result.Functions {
+		if strings.Contains(fn.Package, "webdav") {
+			t.Fatalf("expected scope filter to exclude sibling package, got %#v", fn)
+		}
+	}
+	if result.ScopePattern != "./sync/..." {
+		t.Fatalf("expected scope_pattern to round-trip, got %q", result.ScopePattern)
+	}
 }
 
 func TestFindDeadCode_StreamingChunkSize(t *testing.T) {
@@ -161,4 +232,26 @@ func findDeadFunction(r *DeadCodeResult, suffix string) *DeadFunction {
 		}
 	}
 	return nil
+}
+
+func createTestModuleFiles(t *testing.T, name string, files map[string]string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modContent := "module " + name + "\n\ngo 1.23\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(modContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for fname, content := range files {
+		path := filepath.Join(dir, fname)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
 }
