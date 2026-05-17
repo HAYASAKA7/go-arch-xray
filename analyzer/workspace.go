@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -151,8 +152,14 @@ type Workspace struct {
 }
 
 func NewWorkspace() *Workspace {
+	capacity := defaultCacheCapacity
+	if raw := strings.TrimSpace(os.Getenv("GO_ARCH_XRAY_CACHE_CAPACITY")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 {
+			capacity = n
+		}
+	}
 	w := &Workspace{
-		capacity: defaultCacheCapacity,
+		capacity: capacity,
 		ttl:      15 * time.Minute, // Default TTL
 		cache:    make(map[cacheKey]*list.Element),
 		order:    list.New(),

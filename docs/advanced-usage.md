@@ -48,6 +48,12 @@ orm:
 
 User-local defaults are also supported at the OS config path, for example `%APPDATA%\go-arch-xray\config.yml` on Windows or `~/.config/go-arch-xray/config.yml` on Linux. Repo config should hold shared team policy; user-local config is best for personal output preferences.
 
+`GO_ARCH_XRAY_CACHE_CAPACITY` sets the initial in-memory workspace cache
+capacity for the server process. Repo/user `cache_capacity` config takes
+precedence for analysis requests that load configuration. Increase capacity
+when one MCP session regularly alternates between several roots or
+package-pattern sets; reduce it when memory is constrained.
+
 ## Limitations
 
 ### Call Graph Precision
@@ -86,6 +92,20 @@ The `find_dead_code` tool defaults to `mode: "precision"`, which reports high-co
 
 Verify before deleting any symbols reported by `find_dead_code`.
 
+### Orphaned Database Model Detection
+
+The `find_orphaned_database_models` tool uses static evidence and should be
+treated as a review signal. It recognizes direct ORM calls and bounded wrapper
+forwarding patterns, including context-aware tenant sessions and repository
+helpers that pass model destinations into GORM-style calls such as `Find`,
+`Scan`, `Create`, `Updates`, and `AutoMigrate`.
+
+When migration directories are configured, matching table evidence lowers
+orphan confidence. A referenced model that is present in migrations is not
+reported as `no_orm_usage` solely because its database calls are hidden behind
+project-specific wrappers. Reflection, dynamic SQL construction, and models
+stored only in `context.Context` remain conservative cases for manual review.
+
 ## Troubleshooting
 
 ### Empty Results
@@ -104,7 +124,7 @@ Verify before deleting any symbols reported by `find_dead_code`.
 
 - High memory usage can occur on very large monorepos. Narrow your `package_patterns` to specific modules or subtrees.
 - Use `package_patterns` with multiple specific patterns instead of broad `./...` patterns.
-- Reduce `cache_capacity` (default 2) if memory is constrained.
+- Tune `cache_capacity` or `GO_ARCH_XRAY_CACHE_CAPACITY` (default 2) based on memory and cache-hit needs.
 - Use `limit`/`offset` or `chunk_size`+`cursor` to paginate results instead of requesting all items at once.
 
 ### Slow Analysis

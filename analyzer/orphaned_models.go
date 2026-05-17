@@ -14,6 +14,8 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+const maxOrmUsageExpansionDepth = 4
+
 // OrphanedModelReason classifies why a model is considered orphaned.
 type OrphanedModelReason string
 
@@ -148,16 +150,19 @@ func FindOrphanedDatabaseModelsWithOptions(ws *Workspace, dir, pattern string, o
 		var notes string
 
 		switch {
-		case refs == 0 && !ormUsage:
+		case refs == 0 && !ormUsage && !inMigrations:
+			reason = OrphanedNoReferences
+			notes = fmt.Sprintf("no references to this struct type found in the program and table %q not found in migrations", tableName)
+		case refs > 0 && !ormUsage && !inMigrations:
+			reason = OrphanedNoOrmUsage
+			// No ORM usage and not in migrations
+			notes = fmt.Sprintf("found %d reference(s), no ORM usage, and table %q not found in migrations", refs, tableName)
+		case refs == 0 && !ormUsage && len(migrationFilesText) == 0:
 			reason = OrphanedNoReferences
 			notes = "no references to this struct type found in the program"
-		case refs > 0 && !ormUsage:
+		case refs > 0 && !ormUsage && len(migrationFilesText) == 0:
 			reason = OrphanedNoOrmUsage
-			notes = fmt.Sprintf("found %d reference(s) but no ORM/database operations", refs)
-		case !inMigrations && len(migrationFilesText) > 0 && !ormUsage:
-			// No ORM usage and not in migrations
-			reason = OrphanedNoOrmUsage
-			notes = fmt.Sprintf("found %d reference(s), no ORM usage, and table %q not found in migrations", refs, tableName)
+			notes = fmt.Sprintf("found %d reference(s) but no ORM/database operations; no migration directories were configured", refs)
 		default:
 			continue // Model is used, not orphaned
 		}
@@ -327,20 +332,20 @@ func referencesType(sig *types.Signature, targetType types.Type) bool {
 func instructionReferencesType(instr ssa.Instruction, targetType types.Type) bool {
 	switch inst := instr.(type) {
 	case *ssa.Alloc:
-		return types.Identical(pointerElem(inst.Type()), targetType) || types.Identical(inst.Type(), targetType)
+		return typeContainsModel(inst.Type(), targetType)
 	case *ssa.MakeSlice:
-		return types.Identical(pointerElem(inst.Type()), targetType)
+		return typeContainsModel(inst.Type(), targetType)
 	case *ssa.Store:
-		if types.Identical(pointerElem(inst.Addr.Type()), targetType) {
+		if typeContainsModel(inst.Addr.Type(), targetType) {
 			return true
 		}
-		if types.Identical(inst.Val.Type(), targetType) {
+		if typeContainsModel(inst.Val.Type(), targetType) {
 			return true
 		}
 	case *ssa.Call:
 		// Check if any argument is our type
 		for _, arg := range inst.Call.Args {
-			if types.Identical(arg.Type(), targetType) || types.Identical(pointerElem(arg.Type()), targetType) {
+			if valueContainsModel(arg, targetType) {
 				return true
 			}
 		}
@@ -350,6 +355,7 @@ func instructionReferencesType(instr ssa.Instruction, targetType types.Type) boo
 
 // hasOrmUsage checks if the model is used in common ORM operations.
 func hasOrmUsage(funcs []*ssa.Function, targetType types.Type, framework string) bool {
+	summaries := buildOrmUsageSummaries(funcs, framework)
 	for _, fn := range funcs {
 		if fn == nil {
 			continue
@@ -361,30 +367,8 @@ func hasOrmUsage(funcs []*ssa.Function, targetType types.Type, framework string)
 				if !ok {
 					continue
 				}
-
-				// Check for common ORM method names
-				if isOrmOperation(call, framework) {
-					// Check if first argument is our model type
-					if len(call.Call.Args) > 0 {
-						argType := pointerElem(call.Call.Args[0].Type())
-						if types.Identical(argType, targetType) {
-							return true
-						}
-						// Also check slice of our type
-						if slice, ok := argType.(*types.Slice); ok && types.Identical(slice.Elem(), targetType) {
-							return true
-						}
-					}
-
-					// Check for AutoMigrate which takes variadic args
-					if call.Call.Method != nil && call.Call.Method.Name() == "AutoMigrate" {
-						for _, arg := range call.Call.Args {
-							argType := pointerElem(arg.Type())
-							if types.Identical(argType, targetType) {
-								return true
-							}
-						}
-					}
+				if callUsesModelInOrm(call, targetType, framework, summaries, maxOrmUsageExpansionDepth, make(map[string]bool)) {
+					return true
 				}
 			}
 		}
@@ -393,28 +377,306 @@ func hasOrmUsage(funcs []*ssa.Function, targetType types.Type, framework string)
 	return false
 }
 
-// isOrmOperation checks if a call is to a common ORM method.
-func isOrmOperation(call *ssa.Call, framework string) bool {
-	if call.Call.Method == nil {
-		return false
+type ormUsageSummary struct {
+	ParamIndexes   map[int]bool
+	ReceiverDriven bool
+}
+
+func buildOrmUsageSummaries(funcs []*ssa.Function, framework string) map[*ssa.Function]ormUsageSummary {
+	summaries := make(map[*ssa.Function]ormUsageSummary, len(funcs))
+	for _, fn := range funcs {
+		if fn != nil {
+			summaries[fn] = ormUsageSummary{ParamIndexes: make(map[int]bool)}
+		}
 	}
 
-	methodName := call.Call.Method.Name()
+	changed := true
+	for pass := 0; pass < maxOrmUsageExpansionDepth && changed; pass++ {
+		changed = false
+		for _, fn := range funcs {
+			if fn == nil {
+				continue
+			}
+			summary := summaries[fn]
+			if summary.ParamIndexes == nil {
+				summary.ParamIndexes = make(map[int]bool)
+			}
+			for _, block := range fn.Blocks {
+				for _, instr := range block.Instrs {
+					call, ok := instr.(*ssa.Call)
+					if !ok {
+						continue
+					}
+					if isOrmOperation(call, framework) {
+						for _, idx := range callModelParamIndexes(fn, call.Call.Args) {
+							if !summary.ParamIndexes[idx] {
+								summary.ParamIndexes[idx] = true
+								changed = true
+							}
+						}
+						if callReceiverComesFromFunctionParam(fn, call) && !summary.ReceiverDriven {
+							summary.ReceiverDriven = true
+							changed = true
+						}
+						continue
+					}
+					callee := call.Call.StaticCallee()
+					if callee == nil {
+						continue
+					}
+					calleeSummary, ok := summaries[callee]
+					if !ok {
+						continue
+					}
+					if calleeSummary.ReceiverDriven && callReceiverComesFromFunctionParam(fn, call) && !summary.ReceiverDriven {
+						summary.ReceiverDriven = true
+						changed = true
+					}
+					for idx := range forwardedOrmParamIndexes(fn, call, calleeSummary) {
+						if !summary.ParamIndexes[idx] {
+							summary.ParamIndexes[idx] = true
+							changed = true
+						}
+					}
+				}
+			}
+			summaries[fn] = summary
+		}
+	}
+	return summaries
+}
+
+func callUsesModelInOrm(call *ssa.Call, targetType types.Type, framework string, summaries map[*ssa.Function]ormUsageSummary, depth int, seen map[string]bool) bool {
+	if call == nil {
+		return false
+	}
+	if isOrmOperation(call, framework) {
+		for _, arg := range call.Call.Args {
+			if valueContainsModel(arg, targetType) {
+				return true
+			}
+		}
+		if receiverContainsModel(call, targetType) {
+			return true
+		}
+	}
+	if depth <= 0 {
+		return false
+	}
+	callee := call.Call.StaticCallee()
+	if callee == nil {
+		return false
+	}
+	key := callee.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	defer delete(seen, key)
+
+	summary, ok := summaries[callee]
+	if !ok {
+		return false
+	}
+	for paramIndex := range summary.ParamIndexes {
+		argIndex := callArgIndexForCalleeParam(call, callee, paramIndex)
+		if argIndex >= 0 && argIndex < len(call.Call.Args) && valueContainsModel(call.Call.Args[argIndex], targetType) {
+			return true
+		}
+	}
+	if summary.ReceiverDriven && receiverContainsModel(call, targetType) {
+		return true
+	}
+	return false
+}
+
+func callModelParamIndexes(fn *ssa.Function, args []ssa.Value) []int {
+	seen := make(map[int]bool)
+	var out []int
+	for _, arg := range args {
+		idx := sourceParamIndex(fn, arg)
+		if idx < 0 || seen[idx] {
+			continue
+		}
+		seen[idx] = true
+		out = append(out, idx)
+	}
+	return out
+}
+
+func forwardedOrmParamIndexes(fn *ssa.Function, call *ssa.Call, calleeSummary ormUsageSummary) map[int]bool {
+	out := make(map[int]bool)
+	for calleeParamIndex := range calleeSummary.ParamIndexes {
+		argIndex := callArgIndexForCalleeParam(call, call.Call.StaticCallee(), calleeParamIndex)
+		if argIndex < 0 || argIndex >= len(call.Call.Args) {
+			continue
+		}
+		if idx := sourceParamIndex(fn, call.Call.Args[argIndex]); idx >= 0 {
+			out[idx] = true
+		}
+	}
+	return out
+}
+
+func callReceiverComesFromFunctionParam(fn *ssa.Function, call *ssa.Call) bool {
+	receiver := receiverValue(call)
+	if receiver == nil {
+		return false
+	}
+	return sourceParamIndex(fn, receiver) >= 0
+}
+
+func receiverContainsModel(call *ssa.Call, targetType types.Type) bool {
+	receiver := receiverValue(call)
+	return receiver != nil && valueContainsModel(receiver, targetType)
+}
+
+func receiverValue(call *ssa.Call) ssa.Value {
+	if call == nil {
+		return nil
+	}
+	if callee := call.Call.StaticCallee(); callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
+		if len(call.Call.Args) > 0 {
+			return call.Call.Args[0]
+		}
+		return nil
+	}
+	if call.Call.Value == nil {
+		return nil
+	}
+	return call.Call.Value
+}
+
+func callArgIndexForCalleeParam(call *ssa.Call, callee *ssa.Function, paramIndex int) int {
+	if call == nil || callee == nil || paramIndex < 0 {
+		return -1
+	}
+	return paramIndex
+}
+
+func sourceParamIndex(fn *ssa.Function, value ssa.Value) int {
+	if fn == nil || value == nil {
+		return -1
+	}
+	for depth := 0; value != nil && depth < 8; depth++ {
+		switch v := value.(type) {
+		case *ssa.Parameter:
+			return paramIndexByValue(fn, v)
+		case *ssa.UnOp:
+			value = v.X
+		case *ssa.ChangeType:
+			value = v.X
+		case *ssa.Convert:
+			value = v.X
+		case *ssa.MakeInterface:
+			value = v.X
+		case *ssa.Slice:
+			value = v.X
+		default:
+			return -1
+		}
+	}
+	return -1
+}
+
+func valueContainsModel(value ssa.Value, targetType types.Type) bool {
+	if value == nil {
+		return false
+	}
+	if typeContainsModel(value.Type(), targetType) {
+		return true
+	}
+	for depth := 0; value != nil && depth < 8; depth++ {
+		switch v := value.(type) {
+		case *ssa.UnOp:
+			value = v.X
+		case *ssa.ChangeType:
+			value = v.X
+		case *ssa.Convert:
+			value = v.X
+		case *ssa.MakeInterface:
+			value = v.X
+		case *ssa.Slice:
+			value = v.X
+		default:
+			return false
+		}
+		if typeContainsModel(value.Type(), targetType) {
+			return true
+		}
+	}
+	return false
+}
+
+func typeContainsModel(t types.Type, targetType types.Type) bool {
+	return typeContainsModelSeen(t, targetType, make(map[types.Type]bool))
+}
+
+func typeContainsModelSeen(t types.Type, targetType types.Type, seen map[types.Type]bool) bool {
+	if t == nil || targetType == nil {
+		return false
+	}
+	if types.Identical(t, targetType) {
+		return true
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+
+	switch tt := t.(type) {
+	case *types.Pointer:
+		return typeContainsModelSeen(tt.Elem(), targetType, seen)
+	case *types.Slice:
+		return typeContainsModelSeen(tt.Elem(), targetType, seen)
+	case *types.Array:
+		return typeContainsModelSeen(tt.Elem(), targetType, seen)
+	case *types.Named:
+		if types.Identical(tt, targetType) {
+			return true
+		}
+		return typeContainsModelSeen(tt.Underlying(), targetType, seen)
+	case *types.Alias:
+		return typeContainsModelSeen(types.Unalias(tt), targetType, seen)
+	}
+	return false
+}
+
+// isOrmOperation checks if a call is to a common ORM method.
+func isOrmOperation(call *ssa.Call, framework string) bool {
+	methodName := ormCallMethodName(call)
+	if methodName == "" {
+		return false
+	}
 
 	// GORM methods
 	if framework == "gorm" {
 		gormMethods := map[string]bool{
-			"Find":        true,
-			"First":       true,
-			"Last":        true,
-			"Take":        true,
-			"Create":      true,
-			"Save":        true,
-			"Update":      true,
-			"Delete":      true,
-			"Where":       true,
-			"Model":       true,
-			"AutoMigrate": true,
+			"Association":     true,
+			"Attrs":           true,
+			"Assign":          true,
+			"AutoMigrate":     true,
+			"Count":           true,
+			"Create":          true,
+			"CreateInBatches": true,
+			"Delete":          true,
+			"Exec":            true,
+			"Find":            true,
+			"FindInBatches":   true,
+			"First":           true,
+			"FirstOrCreate":   true,
+			"FirstOrInit":     true,
+			"Last":            true,
+			"Model":           true,
+			"Pluck":           true,
+			"Raw":             true,
+			"Save":            true,
+			"Scan":            true,
+			"Scopes":          true,
+			"Take":            true,
+			"Update":          true,
+			"Updates":         true,
+			"Where":           true,
 		}
 		return gormMethods[methodName]
 	}
@@ -480,6 +742,19 @@ func isOrmOperation(call *ssa.Call, framework string) bool {
 	}
 
 	return false
+}
+
+func ormCallMethodName(call *ssa.Call) string {
+	if call == nil {
+		return ""
+	}
+	if call.Call.Method != nil {
+		return call.Call.Method.Name()
+	}
+	if callee := call.Call.StaticCallee(); callee != nil {
+		return callee.Name()
+	}
+	return ""
 }
 
 // extractOrmModelsFromSyntax walks pkg.Syntax for every package to collect

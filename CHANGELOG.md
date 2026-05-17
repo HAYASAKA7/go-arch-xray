@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.7] - 2026-05-17
+
+### Changed
+
+- Improved `find_orphaned_database_models` precision for GORM-style codebases that use context-aware tenant sessions, repository helpers, raw SQL `Scan` destinations, or wrapper methods that forward model values into ORM calls.
+- Models with code references and matching migration table evidence are no longer reported as `no_orm_usage` solely because direct ORM calls are hidden behind project-specific session helpers.
+- Expanded GORM operation recognition to include common read/write/query-builder methods such as `Scan`, `Raw`, `Exec`, `Updates`, `FindInBatches`, `FirstOrCreate`, `Pluck`, `Count`, and related helpers.
+- Made workspace cache capacity configurable at runtime with `GO_ARCH_XRAY_CACHE_CAPACITY`, while preserving the built-in default of 2 entries.
+- Moved hardcoded external real-world validation tests behind the `realworld` build tag so default `go test ./...` no longer depends on a local `D:\Work\02\netdisk-server` checkout. Run them explicitly with `go test . -tags realworld -run "^TestRealWorld"`.
+
 ## [0.6.6] - 2026-05-15
 
 ### Added

@@ -67,19 +67,20 @@ func TestIsOrmOperation(t *testing.T) {
 			var result bool
 			methodName := tt.method
 
-			if tt.framework == "gorm" {
+			switch tt.framework {
+			case "gorm":
 				gormMethods := map[string]bool{"Find": true, "First": true, "Last": true, "Take": true, "Create": true, "Save": true, "Update": true, "Delete": true, "Where": true, "Model": true, "AutoMigrate": true}
 				result = gormMethods[methodName]
-			} else if tt.framework == "ent" {
+			case "ent":
 				entMethods := map[string]bool{"Create": true, "UpdateOne": true, "Update": true, "Delete": true, "DeleteOne": true, "Query": true, "Get": true, "First": true, "Count": true}
 				result = entMethods[methodName]
-			} else if tt.framework == "sqlx" {
+			case "sqlx":
 				sqlxMethods := map[string]bool{"Get": true, "Select": true, "Exec": true, "NamedExec": true, "Query": true, "QueryRow": true}
 				result = sqlxMethods[methodName]
-			} else if tt.framework == "bun" {
+			case "bun":
 				bunMethods := map[string]bool{"NewSelect": true, "NewInsert": true, "NewUpdate": true, "NewDelete": true, "NewRaw": true, "NewCreateTable": true, "NewDropTable": true, "Exec": true, "QueryRow": true, "Query": true, "Scan": true}
 				result = bunMethods[methodName]
-			} else if tt.framework == "sqlc" {
+			case "sqlc":
 				if strings.HasPrefix(methodName, "Create") || strings.HasPrefix(methodName, "Get") || strings.HasPrefix(methodName, "List") || strings.HasPrefix(methodName, "Update") || strings.HasPrefix(methodName, "Delete") || strings.HasPrefix(methodName, "Count") || strings.HasPrefix(methodName, "Exec") {
 					result = true
 				}
@@ -366,4 +367,131 @@ func TestReadMigrationFiles(t *testing.T) {
 	if strings.Contains(text, "ignore me") {
 		t.Errorf("Expected migration text to NOT contain ignore me, got: %s", text)
 	}
+}
+
+func TestFindOrphanedDatabaseModels_TenantSessionWrapperForwarding(t *testing.T) {
+	dir := createTestModuleFiles(t, "tenantwrapper", map[string]string{
+		"models.go": `
+package tenantwrapper
+
+import "context"
+
+type DB struct{}
+
+func (db *DB) Find(dest any) error { return nil }
+
+type TenantSession struct {
+	db *DB
+}
+
+func TenantDB(ctx context.Context) *TenantSession {
+	return &TenantSession{db: &DB{}}
+}
+
+func (s *TenantSession) Fetch(dest any) error {
+	return s.db.Find(dest)
+}
+
+type PluginPassportUser struct {
+	ID   int    ` + "`gorm:\"primaryKey\"`" + `
+	Name string ` + "`gorm:\"column:name\"`" + `
+}
+
+func LoadPassportUser(ctx context.Context, id int) (*PluginPassportUser, error) {
+	var user PluginPassportUser
+	if err := TenantDB(ctx).Fetch(&user); err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+`,
+	})
+
+	result, err := FindOrphanedDatabaseModelsWithOptions(newTestWorkspace(t), dir, "./...", OrphanedModelOptions{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model := findOrphanedModel(result, "PluginPassportUser"); model != nil {
+		t.Fatalf("tenant wrapper forwarded ORM usage should keep model live, got orphaned finding: %+v", *model)
+	}
+}
+
+func TestFindOrphanedDatabaseModels_GormRawScanDestination(t *testing.T) {
+	dir := createTestModuleFiles(t, "rawscanmodel", map[string]string{
+		"models.go": `
+package rawscanmodel
+
+import "context"
+
+type DB struct{}
+
+func (db *DB) Raw(query string, args ...any) *DB { return db }
+func (db *DB) Scan(dest any) error { return nil }
+
+func TenantDB(ctx context.Context) *DB { return &DB{} }
+
+type PluginOrgSyncState struct {
+	ID    int    ` + "`gorm:\"primaryKey\"`" + `
+	OrgID string ` + "`gorm:\"column:org_id\"`" + `
+}
+
+func LoadOrgSyncStates(ctx context.Context) ([]PluginOrgSyncState, error) {
+	var rows []PluginOrgSyncState
+	if err := TenantDB(ctx).Raw("select * from plugin_org_sync_states").Scan(&rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+`,
+	})
+
+	result, err := FindOrphanedDatabaseModelsWithOptions(newTestWorkspace(t), dir, "./...", OrphanedModelOptions{}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model := findOrphanedModel(result, "PluginOrgSyncState"); model != nil {
+		t.Fatalf("Raw(...).Scan destination should keep model live, got orphaned finding: %+v", *model)
+	}
+}
+
+func TestFindOrphanedDatabaseModels_ReferencedMigrationModelIsNotReportedAsNoOrmUsage(t *testing.T) {
+	dir := createTestModuleFiles(t, "migrationbackedmodel", map[string]string{
+		"models.go": `
+package migrationbackedmodel
+
+type PluginPassportCasdoorMapping struct {
+	ID     int    ` + "`gorm:\"primaryKey\"`" + `
+	UserID string ` + "`gorm:\"column:user_id\"`" + `
+}
+
+func NewMapping(userID string) PluginPassportCasdoorMapping {
+	return PluginPassportCasdoorMapping{UserID: userID}
+}
+`,
+		"migrations/001_plugin_passport_casdoor_mappings.sql": `
+CREATE TABLE plugin_passport_casdoor_mappings (
+	id integer primary key,
+	user_id text not null
+);
+`,
+	})
+
+	result, err := FindOrphanedDatabaseModelsWithOptions(newTestWorkspace(t), dir, "./...", OrphanedModelOptions{
+		MigrationDirs: []string{"migrations"},
+	}, QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model := findOrphanedModel(result, "PluginPassportCasdoorMapping"); model != nil {
+		t.Fatalf("referenced model present in migrations should not be reported as orphaned without stronger evidence: %+v", *model)
+	}
+}
+
+func findOrphanedModel(result *OrphanedModelResult, name string) *OrphanedModel {
+	for i := range result.Models {
+		if result.Models[i].Name == name {
+			return &result.Models[i]
+		}
+	}
+	return nil
 }

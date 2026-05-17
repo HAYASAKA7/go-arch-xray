@@ -37,6 +37,9 @@ npx -y @hayasaka7/go-arch-xray
 - `GO_ARCH_XRAY_BIN` — absolute path to a pre-installed binary. When set,
   `postinstall` is skipped and the launcher invokes that binary directly.
   Useful for air-gapped environments or corporate package mirrors.
+- `GO_ARCH_XRAY_CACHE_CAPACITY` — initial in-memory workspace cache capacity
+  for the server process. Repo/user `cache_capacity` config still takes
+  precedence for analysis requests that load configuration.
 
 ## Troubleshooting
 

@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+func TestNewWorkspace_UsesCacheCapacityEnv(t *testing.T) {
+	old := os.Getenv("GO_ARCH_XRAY_CACHE_CAPACITY")
+	t.Cleanup(func() {
+		if old == "" {
+			_ = os.Unsetenv("GO_ARCH_XRAY_CACHE_CAPACITY")
+			return
+		}
+		_ = os.Setenv("GO_ARCH_XRAY_CACHE_CAPACITY", old)
+	})
+
+	if err := os.Setenv("GO_ARCH_XRAY_CACHE_CAPACITY", "5"); err != nil {
+		t.Fatal(err)
+	}
+
+	ws := NewWorkspace()
+	defer ws.Close()
+
+	_, capacity := ws.Stats()
+	if capacity != 5 {
+		t.Fatalf("expected cache capacity 5 from env, got %d", capacity)
+	}
+}
+
 func TestWorkspaceGetOrLoad_ReturnsCachedProgram(t *testing.T) {
 	ws := newTestWorkspace(t)
 

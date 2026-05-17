@@ -1,13 +1,13 @@
 # Go Architecture X-Ray MCP
 
-Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs locally over stdio and maintains a process-scoped, lazily-initialized LRU cache (default 2 entries) of analyzed programs. The server features an automated background sweeper that evicts idle caches after 15 minutes to minimize system memory footprint during the life of the MCP session.
+Go Architecture X-Ray is a Model Context Protocol server for inspecting Go codebases from an AI client. It runs locally over stdio and maintains a process-scoped, lazily-initialized LRU cache of analyzed programs. The cache defaults to 2 entries and can be tuned with `GO_ARCH_XRAY_CACHE_CAPACITY`. The server features an automated background sweeper that evicts idle caches after 15 minutes to minimize system memory footprint during the life of the MCP session.
 
 ## Features Overview
 
 - **Call Graph & Reachability:** Analyze call hierarchies and trace execution paths across your Go codebase.
 - **Import Graph & Architecture:** Map package dependencies, detect cycles, and enforce architectural boundaries.
 - **Struct Analysis:** Discover interface implementations, trace struct lifecycles, and identify concurrency risks with bounded SSA access summaries, lockset tracking, and atomic awareness.
-- **Code Quality & Refactor Signals:** Detect precision-first dead-code candidates, find duplicate methods, identify orphaned database models, and compute complexity metrics (cyclomatic, cognitive, Halstead).
+- **Code Quality & Refactor Signals:** Detect precision-first dead-code candidates, find duplicate methods, identify orphaned database models with wrapper/session-aware ORM usage evidence, and compute complexity metrics (cyclomatic, cognitive, Halstead).
 - **Workspace Management:** Dynamically reload workspaces, manage caches, inspect configurations, and list entrypoints (HTTP routes, gRPC endpoints, etc.).
 
 ## Focused Candidate Reports
@@ -65,6 +65,19 @@ go-arch-xray
 Set `GO_ARCH_XRAY_BIN=/absolute/path/to/binary` to skip the download and
 point the launcher at a pre-installed binary (useful for air-gapped
 environments).
+
+## Runtime Tuning
+
+Set `GO_ARCH_XRAY_CACHE_CAPACITY` to keep more loaded workspaces warm when
+clients alternate between broad and narrow package patterns:
+
+```bash
+GO_ARCH_XRAY_CACHE_CAPACITY=6 go-arch-xray
+```
+
+Higher values reduce repeated cold `go/packages` and SSA loads at the cost of
+additional memory. Repo/user `cache_capacity` config still takes precedence for
+analysis requests that load configuration.
 
 ## MCP Host Configuration
 
