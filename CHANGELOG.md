@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.8] - 2026-05-18
+
+### Added
+
+- Added the `suggest_analysis_workflow` MCP tool so tool-first agents can request an MCP-first workflow before falling back to raw file search.
+- Added MCP prompts for common Go repository workflows: onboarding, refactor prechecks, cleanup audits, API surface inventory, concurrency review, and architecture checks.
+- Added MCP resources for cross-client agent guidance at `go-arch-xray://agent-guide` and `go-arch-xray://workflow/{name}`.
+
+### Changed
+
+- Updated documentation to describe protocol-native workflow guidance that does not depend on client-specific skill files.
+- Strengthened workflow guidance so broad repo tasks such as checking, inspecting, reviewing, auditing, mapping, or refactoring a Go repository steer agents toward MCP tools before generic file reads.
+
 ## [0.6.7] - 2026-05-17
 
 ### Changed

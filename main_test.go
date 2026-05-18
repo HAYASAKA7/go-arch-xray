@@ -8,11 +8,97 @@ import (
 	"testing"
 
 	"github.com/HAYASAKA7/go-arch-xray/analyzer"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestMain(m *testing.M) {
 	os.Setenv("GO_ARCH_XRAY_USER_CONFIG", "off")
 	os.Exit(m.Run())
+}
+
+func TestHandleSuggestAnalysisWorkflow_ReturnsTaskWorkflow(t *testing.T) {
+	toolResult, result, err := handleSuggestAnalysisWorkflow(context.Background(), nil, SuggestAnalysisWorkflowInput{
+		Task: "refactor planning",
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured success result, got tool result: %#v", toolResult)
+	}
+	if result == nil {
+		t.Fatal("expected workflow result")
+	}
+	if result.Workflow != "refactor_precheck" {
+		t.Fatalf("expected refactor_precheck workflow, got %q", result.Workflow)
+	}
+	if !containsString(result.Tools, "find_callers") {
+		t.Fatalf("expected find_callers in tools, got %#v", result.Tools)
+	}
+	if !strings.Contains(result.Instructions, "inspect_workspace_config") {
+		t.Fatalf("expected instructions to mention inspect_workspace_config, got %q", result.Instructions)
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHandleWorkflowPrompt_ReturnsPromptMessages(t *testing.T) {
+	result, err := handleWorkflowPrompt(context.Background(), &mcp.GetPromptRequest{
+		Params: &mcp.GetPromptParams{Name: "go_refactor_precheck"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected prompt error: %v", err)
+	}
+	if result == nil || len(result.Messages) != 1 {
+		t.Fatalf("expected one prompt message, got %#v", result)
+	}
+	content, ok := result.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Messages[0].Content)
+	}
+	if !strings.Contains(content.Text, "find_callers") || !strings.Contains(content.Text, "reload_workspace") {
+		t.Fatalf("expected refactor workflow text, got %q", content.Text)
+	}
+}
+
+func TestHandleAgentGuideResource_ReturnsGuide(t *testing.T) {
+	result, err := handleAgentGuideResource(context.Background(), &mcp.ReadResourceRequest{
+		Params: &mcp.ReadResourceParams{URI: "go-arch-xray://agent-guide"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected resource error: %v", err)
+	}
+	if result == nil || len(result.Contents) != 1 {
+		t.Fatalf("expected one resource content, got %#v", result)
+	}
+	if result.Contents[0].URI != "go-arch-xray://agent-guide" {
+		t.Fatalf("expected resource URI to round trip, got %q", result.Contents[0].URI)
+	}
+	if !strings.Contains(result.Contents[0].Text, "MCP-first") {
+		t.Fatalf("expected agent guide text, got %q", result.Contents[0].Text)
+	}
+}
+
+func TestHandleWorkflowResource_ReturnsNamedWorkflow(t *testing.T) {
+	result, err := handleWorkflowResource(context.Background(), &mcp.ReadResourceRequest{
+		Params: &mcp.ReadResourceParams{URI: "go-arch-xray://workflow/cleanup"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected resource error: %v", err)
+	}
+	if result == nil || len(result.Contents) != 1 {
+		t.Fatalf("expected one resource content, got %#v", result)
+	}
+	if !strings.Contains(result.Contents[0].Text, "find_dead_code") {
+		t.Fatalf("expected cleanup workflow text, got %q", result.Contents[0].Text)
+	}
 }
 
 func TestHandlePackageDependencies_ReturnsStructuredDependencies(t *testing.T) {

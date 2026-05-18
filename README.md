@@ -26,6 +26,14 @@ or `package_patterns`, then narrow noisy candidate-style reports with
 }
 ```
 
+## Agent Workflow Guidance
+
+The server exposes MCP-native prompts and resources for clients that support
+them, plus a `suggest_analysis_workflow` tool for tool-first agents. These
+cover onboarding, refactor prechecks, cleanup audits, API surface inventory,
+concurrency review, and architecture checks without requiring client-specific
+skill files.
+
 ## Install From GitHub Releases
 
 Tagged releases build binaries for:

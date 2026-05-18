@@ -30,6 +30,7 @@
 
 ### Workspace Management
 
+- `suggest_analysis_workflow`: Returns a compact MCP-first workflow for Go repository onboarding, refactor prechecks, cleanup audits, API surface inventory, concurrency review, or architecture checks. Call this before reading files when the user asks to check, inspect, understand, review, audit, map, or refactor a Go repository.
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
 - `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count, and last access time).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
@@ -39,6 +40,34 @@
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
 - `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
 - `list_grpc_endpoints`: Discovers generated grpc-go `ServiceDesc` methods and `Register<Service>Server` call sites in loaded Go packages. Returns service, method, full method path, RPC type (`unary`, `client_stream`, `server_stream`, `bidi_stream`), handler, proto metadata, registration status, implementations, and source locations. Include generated `*.pb.go` or `*_grpc.pb.go` packages in the package pattern. Pagination and streaming cover endpoint rows and registration rows together; `total` and `total_registrations` report each full unpaged count.
+
+## Prompts and Resources
+
+The server also exposes MCP-native prompt/resource guidance so clients do not
+need client-specific skill files to discover good tool workflows.
+
+Prompts:
+
+- `go_onboarding`
+- `go_refactor_precheck`
+- `go_cleanup`
+- `go_api_surface_inventory`
+- `go_concurrency_review`
+- `go_architecture_check`
+
+Resources:
+
+- `go-arch-xray://agent-guide`
+- `go-arch-xray://workflow/onboarding`
+- `go-arch-xray://workflow/refactor_precheck`
+- `go-arch-xray://workflow/cleanup`
+- `go-arch-xray://workflow/api_surface_inventory`
+- `go-arch-xray://workflow/concurrency_review`
+- `go-arch-xray://workflow/architecture_check`
+
+Clients that support prompts/resources can surface these directly. Clients
+that mostly use tools can call `suggest_analysis_workflow` to get the same
+workflow guidance as structured tool output.
 
 ## Common Inputs
 
