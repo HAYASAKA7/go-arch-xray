@@ -75,19 +75,32 @@ func ListHTTPRoutes(ws *Workspace, dir, pattern string) (*HTTPRoutesResult, erro
 }
 
 func ListHTTPRoutesWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*HTTPRoutesResult, error) {
-	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
-	if err != nil {
+	if _, err := ws.GetOrLoadSyntaxOnly(dir, pattern); err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
+	store, err := OpenWorkspaceStore(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
 
-	result := &HTTPRoutesResult{
-		Routes: []HTTPRoute{},
+	rows, err := store.GetHTTPRoutes()
+	if err != nil {
+		return nil, err
 	}
 
-	// Use routes cached during load (extracted before pkg.Syntax was cleared).
-	routes := prog.httpRoutes
-	if routes == nil {
-		routes = []HTTPRoute{}
+	result := &HTTPRoutesResult{Routes: []HTTPRoute{}}
+	routes := make([]HTTPRoute, 0, len(rows))
+	for _, row := range rows {
+		routes = append(routes, HTTPRoute{
+			Method:    row.Method,
+			Path:      row.Path,
+			Handler:   row.Handler,
+			Framework: row.Framework,
+			File:      row.File,
+			Line:      row.Line,
+			Anchor:    contextAnchor(row.File, row.Line, row.Path),
+		})
 	}
 
 	sort.Slice(routes, func(i, j int) bool {

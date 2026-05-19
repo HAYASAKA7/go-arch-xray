@@ -2,19 +2,121 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/HAYASAKA7/go-arch-xray/analyzer"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var (
-	workspace = analyzer.NewWorkspace()
-	stderr    = log.New(os.Stderr, "[go-arch-xray] ", log.LstdFlags)
+	workspace    = analyzer.NewWorkspace()
+	stderr       = log.New(os.Stderr, "[go-arch-xray] ", log.LstdFlags)
+	runtimeState struct {
+		mu      sync.RWMutex
+		current *backgroundRuntime
+	}
 )
+
+type backgroundRuntime struct {
+	store   *analyzer.WorkspaceStore
+	sync    *analyzer.SyncManager
+	watcher *analyzer.FileWatcher
+	router  *queryRouter
+}
+
+type queryRouter struct {
+	workspace    *analyzer.Workspace
+	computeMutex *analyzer.ComputeMutex
+	runtime      *backgroundRuntime
+}
+
+func newQueryRouter(workspace *analyzer.Workspace, runtime *backgroundRuntime) *queryRouter {
+	if workspace == nil {
+		workspace = analyzer.NewWorkspace()
+	}
+	router := &queryRouter{
+		workspace:    workspace,
+		computeMutex: analyzer.NewComputeMutex(),
+		runtime:      runtime,
+	}
+	if runtime != nil && runtime.sync != nil && runtime.sync.Mutex() != nil {
+		router.computeMutex = runtime.sync.Mutex()
+	}
+	return router
+}
+
+func setActiveBackgroundRuntime(runtime *backgroundRuntime) {
+	runtimeState.mu.Lock()
+	defer runtimeState.mu.Unlock()
+	runtimeState.current = runtime
+}
+
+func activeBackgroundRuntime() *backgroundRuntime {
+	runtimeState.mu.RLock()
+	defer runtimeState.mu.RUnlock()
+	return runtimeState.current
+}
+
+func activeQueryRouter() *queryRouter {
+	if runtime := activeBackgroundRuntime(); runtime != nil && runtime.router != nil {
+		return runtime.router
+	}
+	return newQueryRouter(workspace, nil)
+}
+
+func (r *queryRouter) busyResult(reason string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Meta: mcp.Meta{
+			"status":      "busy",
+			"reason":      reason,
+			"eta_seconds": 5,
+			"preemptible": false,
+			"freshness":   "approximate",
+			"rebuilding":  true,
+		},
+		Content: []mcp.Content{&mcp.TextContent{Text: "System is busy updating the index. Please retry in 5 seconds."}},
+	}
+}
+
+func (r *queryRouter) handleBusyError(err error) (*mcp.CallToolResult, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var busy analyzer.ErrComputeInProgress
+	if errors.As(err, &busy) {
+		return r.busyResult("background sync in progress"), true
+	}
+	var aborted analyzer.ErrComputeAborted
+	if errors.As(err, &aborted) {
+		if aborted.Reason == "" {
+			aborted.Reason = "background sync preempted"
+		}
+		return r.busyResult(aborted.Reason), true
+	}
+	return nil, false
+}
+
+func (r *queryRouter) beginSlowPath(owner string) (*mcp.CallToolResult, bool) {
+	if r == nil || r.computeMutex == nil {
+		return nil, true
+	}
+	locked, err := r.computeMutex.TryLock(owner, analyzer.PriorityHigh)
+	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, false
+		}
+		return toolError(err), false
+	}
+	if !locked {
+		return r.busyResult("background sync in progress"), false
+	}
+	return nil, true
+}
 
 type InterfaceTopologyInput struct {
 	InterfaceName   string   `json:"interface_name" jsonschema:"Name of the interface to find implementors for; accepts short name or fully qualified pkgpath.Name"`
@@ -266,6 +368,34 @@ type FindOrphanedDatabaseModelsInput struct {
 	Cursor              string   `json:"cursor,omitempty" jsonschema:"Opaque continuation token returned by a previous streaming call"`
 }
 
+type SemanticSearchInput struct {
+	Query           string   `json:"query" jsonschema:"Natural-language or code query to search against indexed code symbols"`
+	PackagePattern  string   `json:"package_pattern,omitempty" jsonschema:"Single Go package pattern; also accepts comma-separated patterns. Used to select workspace config before searching the shadow index"`
+	PackagePatterns []string `json:"package_patterns,omitempty" jsonschema:"List of Go package patterns used to select workspace config before searching the shadow index"`
+	RootPath        string   `json:"root_path,omitempty" jsonschema:"Root directory of the Go project (defaults to cwd)"`
+	Limit           int      `json:"limit,omitempty" jsonschema:"Maximum code symbols to return"`
+	MaxSourceBytes  int      `json:"max_source_bytes,omitempty" jsonschema:"Maximum source bytes included per symbol. Defaults to 4000"`
+}
+
+type SemanticSearchResult struct {
+	Query   string                 `json:"query"`
+	Limit   int                    `json:"limit"`
+	Total   int                    `json:"total"`
+	Symbols []SemanticSearchSymbol `json:"symbols"`
+	Meta    map[string]any         `json:"_meta,omitempty"`
+}
+
+type SemanticSearchSymbol struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	PackagePath string `json:"package_path"`
+	Name        string `json:"name"`
+	FilePath    string `json:"file_path"`
+	LineStart   int    `json:"line_start"`
+	LineEnd     int    `json:"line_end"`
+	Source      string `json:"source"`
+}
+
 type CacheStatusResult struct {
 	CacheSize     int                    `json:"cache_size"`
 	CacheCapacity int                    `json:"cache_capacity"`
@@ -397,16 +527,55 @@ var defaultWorkflowNotes = []string{
 	"Use raw file search only after the relevant MCP workflow has been attempted or when the needed detail is outside the available tools.",
 }
 
-func main() {
+type serverToolDefinition struct {
+	Name        string
+	Description string
+}
+
+func serverToolDefinitions() []serverToolDefinition {
+	return []serverToolDefinition{
+		{Name: "get_interface_topology", Description: "Find all structs that implement a given Go interface, including via embedding. Returns struct names, package paths, and source locations. Accepts package_patterns array or comma-separated package_pattern for multi-pattern scans."},
+		{Name: "get_package_dependencies", Description: "Primary MCP-first tool for import/dependency topology. Returns direct package import dependencies for one or more Go package patterns and should be used before generic repo text search/read for architecture boundary and layering inspection."},
+		{Name: "reload_workspace", Description: "Invalidate and reload cached Go package/SSA analysis for an explicit root_path and pattern set. Use this when switching projects or when results appear stale/mismatched to the current repo; then retry the target analysis tool."},
+		{Name: "analyze_call_hierarchy", Description: "Primary MCP-first tool for call-flow understanding. Builds a CHA static call hierarchy from a target function, capped at 3 hops, with static/interface/goroutine edge labels. CHA graph is cached per loaded program for reuse across requests. Supports cursor-based streaming via chunk_size + cursor for very large hierarchies."},
+		{Name: "find_callers", Description: "Primary MCP-first tool for reverse call impact analysis. Finds incoming callers for a target function over cached CHA call graph, with depth control and edge labels."},
+		{Name: "trace_struct_lifecycle", Description: "Trace struct instantiation, field mutation, and interface handoff points across SSA. Scans only functions in the requested (root) packages. Supports cursor-based streaming via chunk_size + cursor for structs with very large lifecycle traces."},
+		{Name: "detect_concurrency_risks", Description: "Detect bounded SSA concurrency access risks across goroutine contexts. Tracks field-sensitive reads/writes, closure captures, helper calls, locksets, atomics, and lower-confidence unknown effects for unresolved dynamic calls. Summarizes repeated diagnostics by default and can include raw diagnostics when requested."},
+		{Name: "find_call_path", Description: "Primary MCP-first tool for call reachability questions. Finds call paths from one function to another via BFS over the CHA call graph and returns up to max_paths distinct paths."},
+		{Name: "detect_import_cycles", Description: "Detect import cycles in the loaded package graph using Tarjan SCC. Returns all cyclic strongly-connected components."},
+		{Name: "find_reverse_dependencies", Description: "Find which packages directly (or transitively) import a given target package within the loaded program."},
+		{Name: "cache_status", Description: "Return workspace cache occupancy and LRU entry metadata."},
+		{Name: "inspect_workspace_config", Description: "Inspect project/repo/user config and auto-detected Go workspace defaults. Use first when package scope is unclear, especially for go.work multi-module repos. Does not write files."},
+		{Name: "suggest_workspace_config", Description: "Return a proposed .go-arch-xray.yml based on go.work/go.mod discovery without writing files. Use this to show users a safe repo config proposal."},
+		{Name: "init_workspace_config", Description: "Create .go-arch-xray.yml in the repo root from detected go.work/go.mod defaults. Only call when the user explicitly asks to create or overwrite config; overwrite defaults to false."},
+		{Name: "clear_cache", Description: "Clear cached analysis entries by root/pattern key or clear all entries."},
+		{Name: "check_architecture_boundaries", Description: "Evaluate package import graph against a set of architecture boundary rules. Supports forbid, allow_only, and allow_prefix rule types. Only intra-project imports are evaluated for allow-type rules; stdlib is always permitted."},
+		{Name: "list_entrypoints", Description: "Primary MCP-first tool for runtime/service entry understanding. Lists program entrypoints: main functions, init functions, and goroutine spawn sites across the loaded packages."},
+		{Name: "list_http_routes", Description: "Primary MCP-first tool for API surface discovery. Always pass root_path explicitly for the active repo. Scans source files for HTTP route registrations from net/http, gin, chi, gorilla/mux, and similar router APIs. Returns route method, path, handler, and source location for routes whose path is a string literal. For large APIs, prefer streaming via chunk_size (recommended 20-50; server caps each chunk at 50 by default) + cursor instead of large max_items, which can overflow client/LLM context limits."},
+		{Name: "list_grpc_endpoints", Description: "Primary MCP-first tool for gRPC service topology. Discovers generated grpc-go ServiceDesc methods and Register<Service>Server call sites in loaded Go packages, returning service, method, full method path, RPC type (unary/client_stream/server_stream/bidi_stream), handler, proto metadata, registration status, implementations, and source locations. Use for gRPC API inventory, protobuf service-method mapping, and service implementation discovery. Include generated *.pb.go or *_grpc.pb.go packages in package_pattern/package_patterns."},
+		{Name: "find_dead_code", Description: "Primary MCP-first tool for dead-code detection. Default precision mode returns only high-confidence unreferenced candidates with evidence, while audit mode returns the full static inventory with confidence labels. Pass scope_package_pattern to report only one package subtree while loading broader package_pattern/package_patterns for reachability. Pass include_exported=true to also audit exported symbols (useful for internal modules). Results carry caveats in the 'notes' field — CHA cannot see reflection, plugin loading, cgo, or //go:linkname callers, and registered callback roots such as MCP handlers are treated as live to reduce false positives."},
+		{Name: "find_duplicate_methods", Description: "Primary MCP-first tool for copy-paste detection. Groups together functions and methods whose normalized body and signature match across the loaded workspace. Pass scope_package_pattern to report duplicate groups that touch one package subtree while loading broader package_pattern/package_patterns. Bodies are compared after whitespace normalization and comment stripping; identifier renames still count as distinct (use a similarity tool for fuzzy matching). Tune min_body_lines to filter trivial bodies. Output is sorted with largest groups first so the highest-value refactor candidates surface first."},
+		{Name: "compute_complexity_metrics", Description: "Primary MCP-first tool for refactor triage, code review, onboarding, and test-prioritization. Reports per-function cyclomatic complexity, cognitive complexity, body lines, max nesting, Halstead metrics, and maintainability_index. Use before refactoring unfamiliar functions; use during reviews to spot complexity added by a change; use min_cyclomatic/min_cognitive/min_halstead_volume/max_maintainability_index to focus on hotspots; use include_packages=true for package-level architecture debt scans. Complexity, Halstead, and maintainability scores are structural ranking signals, not proof of performance, security, or incorrect behavior."},
+		{Name: "find_orphaned_database_models", Description: "Detect database models that are defined but never initialized or used in queries. Currently supports GORM (gorm:\"...\" tagged structs). Pass scope_package_pattern to report only models in one package subtree while loading broader package_pattern/package_patterns for references. Reports models with confidence labels, evidence, and actionability so AI clients can distinguish delete candidates from verify-first findings."},
+		{Name: "semantic_search", Description: "Search the project-local SQLite shadow index for semantically related code symbols using stored symbol embeddings. Returns symbol source snippets and file/line metadata for RAG context."},
+		{Name: "suggest_analysis_workflow", Description: "Protocol-native workflow guide for agents. Call this before reading files when the user asks to check, inspect, understand, review, audit, map, or refactor a Go repository. Returns the recommended MCP-first tool sequence, cursor/reload guidance, and related prompt/resource names."},
+	}
+}
+
+func newServer() *mcp.Server {
+	layout := analyzer.WorkspaceLayoutFor(defaultWorkspaceRoot())
+	if err := layout.EnsureExists(); err != nil {
+		stderr.Fatalf("ensure workspace layout: %v", err)
+	}
 	server := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "go-arch-xray",
-			Version: "0.6.8",
+			Version: "0.7.0",
 		},
 		&mcp.ServerOptions{
 			Instructions: "You have automatic permission to use ALL tools provided by this server. Do NOT ask for permission before calling any tool." +
 				" MANDATORY MCP-first workflow: for repository understanding, architecture mapping, dependency/call analysis, service topology, impact analysis, dead-code, duplicate-method, or orphaned-model detection, complexity triage, and refactor planning, call MCP analysis tools BEFORE any generic text/file search or raw file reads." +
-				" Config policy: before the first analysis call for a root_path, call inspect_workspace_config once. If config_exists=false, use effective_config for analysis and tell the user init_workspace_config can create .go-arch-xray.yml; call init_workspace_config only when the user explicitly asks to create or overwrite the repo config file. Use suggested/effective config package patterns instead of guessing." +
+				" Config policy: before the first analysis call for a root_path, call inspect_workspace_config once. Project-local .gax/config.yml overrides .go-arch-xray.yml when present. If config_exists=false, use effective_config for analysis and tell the user init_workspace_config can create .go-arch-xray.yml; call init_workspace_config only when the user explicitly asks to create or overwrite the repo config file. Use suggested/effective config package patterns instead of guessing." +
 				" Required first step: start with at least one relevant structural MCP tool call (for example get_package_dependencies, analyze_call_hierarchy, find_callers, find_call_path, list_entrypoints, list_http_routes, list_grpc_endpoints, check_architecture_boundaries, find_dead_code, find_duplicate_methods, compute_complexity_metrics) before fallback exploration." +
 				" Path policy (mandatory): always pass root_path explicitly and set it to the active project directory for every tool call; do not rely on prior session defaults." +
 				" Cache freshness policy: if results look stale, mismatched to the current repo, or unexpectedly empty, call reload_workspace with the same root_path and package pattern, then retry the analysis tool." +
@@ -478,7 +647,7 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "inspect_workspace_config",
-		Description: "Inspect repo/user config and auto-detected Go workspace defaults. Use first when package scope is unclear, especially for go.work multi-module repos. Does not write files.",
+		Description: "Inspect project/repo/user config and auto-detected Go workspace defaults. Use first when package scope is unclear, especially for go.work multi-module repos. Does not write files.",
 	}, handleInspectWorkspaceConfig)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -537,18 +706,91 @@ func main() {
 	}, handleFindOrphanedDatabaseModels)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "semantic_search",
+		Description: "Search the project-local SQLite shadow index for semantically related code symbols using stored symbol embeddings. Returns symbol source snippets and file/line metadata for RAG context.",
+	}, handleSemanticSearch)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "suggest_analysis_workflow",
 		Description: "Protocol-native workflow guide for agents. Call this before reading files when the user asks to check, inspect, understand, review, audit, map, or refactor a Go repository. Returns the recommended MCP-first tool sequence, cursor/reload guidance, and related prompt/resource names.",
 	}, handleSuggestAnalysisWorkflow)
 
 	registerWorkflowPrompts(server)
 	registerWorkflowResources(server)
+	return server
+}
 
+func main() {
+	ctx := context.Background()
+	runtime := startBackgroundRuntime(ctx, defaultWorkspaceRoot())
+	defer runtime.close()
+
+	server := newServer()
 	stderr.Println("starting go-arch-xray MCP server")
-
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		stderr.Fatalf("server error: %v", err)
 	}
+}
+
+func startBackgroundRuntime(ctx context.Context, root string) *backgroundRuntime {
+	layout := analyzer.WorkspaceLayoutFor(root)
+	if err := layout.EnsureExists(); err != nil {
+		stderr.Printf("background sync disabled: ensure workspace layout: %v", err)
+		return &backgroundRuntime{}
+	}
+
+	store, err := analyzer.OpenWorkspaceStore(root)
+	if err != nil {
+		stderr.Printf("background sync disabled: open workspace store: %v", err)
+		return &backgroundRuntime{}
+	}
+
+	config, err := analyzer.EffectiveWorkspaceConfig(root)
+	if err != nil {
+		stderr.Printf("background sync using defaults: %v", err)
+	}
+	queue := analyzer.NewRebuildQueue()
+	manager := analyzer.NewSyncManagerWithQueueAndRoot(workspace, queue, root, layout.StatePath)
+	manager.Start(ctx)
+	runtime := &backgroundRuntime{store: store, sync: manager}
+	runtime.router = newQueryRouter(workspace, runtime)
+	setActiveBackgroundRuntime(runtime)
+
+	watcher := analyzer.NewFileWatcher(root, store, queue)
+	watcher.SetDebounce(config.Sync.Debounce.Duration())
+	if config.Sync.AutoRebuild != nil && !*config.Sync.AutoRebuild {
+		return runtime
+	}
+	if err := watcher.StartPolling(ctx, config.Sync.CheckInterval.Duration()); err != nil {
+		stderr.Printf("background file watcher disabled: %v", err)
+	} else if err := watcher.ScanAndEnqueue(ctx); err != nil {
+		stderr.Printf("initial background scan failed: %v", err)
+	}
+
+	runtime.watcher = watcher
+	return runtime
+}
+
+func (r *backgroundRuntime) close() {
+	if r == nil {
+		return
+	}
+	if r.watcher != nil {
+		r.watcher.Stop()
+	}
+	if r.store != nil {
+		if err := r.store.Close(); err != nil {
+			stderr.Printf("close workspace store: %v", err)
+		}
+	}
+}
+
+func defaultWorkspaceRoot() string {
+	root, err := os.Getwd()
+	if err != nil {
+		stderr.Fatalf("resolve workspace root: %v", err)
+	}
+	return root
 }
 
 func handleInterfaceTopology(ctx context.Context, req *mcp.CallToolRequest, input InterfaceTopologyInput) (*mcp.CallToolResult, *analyzer.TopologyResult, error) {
@@ -620,9 +862,21 @@ func handleReloadWorkspace(ctx context.Context, req *mcp.CallToolRequest, input 
 }
 
 func handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, input CallHierarchyInput) (*mcp.CallToolResult, *analyzer.CallHierarchyResult, error) {
+	router := activeQueryRouter()
+	return router.handleAnalyzeCallHierarchy(ctx, req, input)
+}
+
+func (r *queryRouter) handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, input CallHierarchyInput) (*mcp.CallToolResult, *analyzer.CallHierarchyResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+
+	if busy, ok := r.beginSlowPath("analyze_call_hierarchy"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("analyze_call_hierarchy")
 	}
 
 	export, err := analyzer.ParseExportFormat(input.Export)
@@ -640,15 +894,30 @@ func handleAnalyzeCallHierarchy(ctx context.Context, req *mcp.CallToolRequest, i
 		Export:    export,
 	}))
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
 }
 
 func handleFindCallers(ctx context.Context, req *mcp.CallToolRequest, input CallersInput) (*mcp.CallToolResult, *analyzer.CallersResult, error) {
+	router := activeQueryRouter()
+	return router.handleFindCallers(ctx, req, input)
+}
+
+func (r *queryRouter) handleFindCallers(ctx context.Context, req *mcp.CallToolRequest, input CallersInput) (*mcp.CallToolResult, *analyzer.CallersResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+
+	if busy, ok := r.beginSlowPath("find_callers"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("find_callers")
 	}
 
 	result, err := analyzer.FindCallersWithOptions(workspace, defaults.RootPath, defaults.Pattern, input.FunctionName, input.MaxDepth, queryOptionsWithConfig(defaults.Config, analyzer.QueryOptions{
@@ -659,15 +928,30 @@ func handleFindCallers(ctx context.Context, req *mcp.CallToolRequest, input Call
 		ChunkSize: input.ChunkSize,
 	}))
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
 }
 
 func handleTraceStructLifecycle(ctx context.Context, req *mcp.CallToolRequest, input StructLifecycleInput) (*mcp.CallToolResult, *analyzer.StructLifecycleResult, error) {
+	router := activeQueryRouter()
+	return router.handleTraceStructLifecycle(ctx, req, input)
+}
+
+func (r *queryRouter) handleTraceStructLifecycle(ctx context.Context, req *mcp.CallToolRequest, input StructLifecycleInput) (*mcp.CallToolResult, *analyzer.StructLifecycleResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+
+	if busy, ok := r.beginSlowPath("trace_struct_lifecycle"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("trace_struct_lifecycle")
 	}
 
 	result, err := analyzer.TraceStructLifecycle(workspace, defaults.RootPath, defaults.Pattern, input.StructName, lifecycleOptionsWithConfig(defaults.Config, analyzer.LifecycleOptions{
@@ -681,34 +965,67 @@ func handleTraceStructLifecycle(ctx context.Context, req *mcp.CallToolRequest, i
 		ChunkSize:  input.ChunkSize,
 	}))
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
 }
 
 func handleDetectConcurrencyRisks(ctx context.Context, req *mcp.CallToolRequest, input ConcurrencyRisksInput) (*mcp.CallToolResult, *analyzer.ConcurrencyRiskResult, error) {
+	router := activeQueryRouter()
+	return router.handleDetectConcurrencyRisks(ctx, req, input)
+}
+
+func (r *queryRouter) handleDetectConcurrencyRisks(ctx context.Context, req *mcp.CallToolRequest, input ConcurrencyRisksInput) (*mcp.CallToolResult, *analyzer.ConcurrencyRiskResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+
+	if busy, ok := r.beginSlowPath("detect_concurrency_risks"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("detect_concurrency_risks")
 	}
 
 	result, err := analyzer.DetectConcurrencyRisks(workspace, defaults.RootPath, defaults.Pattern, analyzer.ConcurrencyRiskOptions{
 		IncludeDiagnostics: input.IncludeDiagnostics,
 	})
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
 }
 
 func handleFindCallPath(ctx context.Context, req *mcp.CallToolRequest, input FindCallPathInput) (*mcp.CallToolResult, *analyzer.FindCallPathResult, error) {
+	router := activeQueryRouter()
+	return router.handleFindCallPath(ctx, req, input)
+}
+
+func (r *queryRouter) handleFindCallPath(ctx context.Context, req *mcp.CallToolRequest, input FindCallPathInput) (*mcp.CallToolResult, *analyzer.FindCallPathResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
 	}
 
+	if busy, ok := r.beginSlowPath("find_call_path"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("find_call_path")
+	}
+
 	result, err := analyzer.FindCallPath(workspace, defaults.RootPath, defaults.Pattern, input.FromFunction, input.ToFunction, input.MaxDepth, input.MaxPaths)
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
@@ -918,9 +1235,21 @@ func handleListGRPCEndpoints(ctx context.Context, req *mcp.CallToolRequest, inpu
 }
 
 func handleFindDeadCode(ctx context.Context, req *mcp.CallToolRequest, input FindDeadCodeInput) (*mcp.CallToolResult, *analyzer.DeadCodeResult, error) {
+	router := activeQueryRouter()
+	return router.handleFindDeadCode(ctx, req, input)
+}
+
+func (r *queryRouter) handleFindDeadCode(ctx context.Context, req *mcp.CallToolRequest, input FindDeadCodeInput) (*mcp.CallToolResult, *analyzer.DeadCodeResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
+	}
+
+	if busy, ok := r.beginSlowPath("find_dead_code"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("find_dead_code")
 	}
 
 	result, err := analyzer.FindDeadCodeWithOptions(workspace, defaults.RootPath, defaults.Pattern, analyzer.DeadCodeOptions{
@@ -935,6 +1264,9 @@ func handleFindDeadCode(ctx context.Context, req *mcp.CallToolRequest, input Fin
 		ChunkSize: input.ChunkSize,
 	}))
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
@@ -989,6 +1321,11 @@ func handleComputeComplexityMetrics(ctx context.Context, req *mcp.CallToolReques
 }
 
 func handleFindOrphanedDatabaseModels(ctx context.Context, req *mcp.CallToolRequest, input FindOrphanedDatabaseModelsInput) (*mcp.CallToolResult, *analyzer.OrphanedModelResult, error) {
+	router := activeQueryRouter()
+	return router.handleFindOrphanedDatabaseModels(ctx, req, input)
+}
+
+func (r *queryRouter) handleFindOrphanedDatabaseModels(ctx context.Context, req *mcp.CallToolRequest, input FindOrphanedDatabaseModelsInput) (*mcp.CallToolResult, *analyzer.OrphanedModelResult, error) {
 	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
 	if err != nil {
 		return toolError(err), nil, nil
@@ -997,6 +1334,13 @@ func handleFindOrphanedDatabaseModels(ctx context.Context, req *mcp.CallToolRequ
 	framework := input.ORMFramework
 	if framework == "" {
 		framework = defaults.Config.ORM.DefaultFramework
+	}
+
+	if busy, ok := r.beginSlowPath("find_orphaned_database_models"); !ok {
+		return busy, nil, nil
+	}
+	if r != nil && r.computeMutex != nil {
+		defer r.computeMutex.Unlock("find_orphaned_database_models")
 	}
 
 	result, err := analyzer.FindOrphanedDatabaseModelsWithOptions(workspace, defaults.RootPath, defaults.Pattern,
@@ -1014,9 +1358,78 @@ func handleFindOrphanedDatabaseModels(ctx context.Context, req *mcp.CallToolRequ
 			ChunkSize: input.ChunkSize,
 		}))
 	if err != nil {
+		if busy, ok := r.handleBusyError(err); ok {
+			return busy, nil, nil
+		}
 		return toolError(err), nil, nil
 	}
 	return nil, result, nil
+}
+
+func handleSemanticSearch(ctx context.Context, req *mcp.CallToolRequest, input SemanticSearchInput) (*mcp.CallToolResult, *SemanticSearchResult, error) {
+	defaults, err := resolveAnalysisDefaults(input.RootPath, input.PackagePattern, input.PackagePatterns)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	query := strings.TrimSpace(input.Query)
+	if query == "" {
+		return toolError(errors.New("semantic search query is required")), nil, nil
+	}
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	maxSourceBytes := input.MaxSourceBytes
+	if maxSourceBytes <= 0 {
+		maxSourceBytes = 4000
+	}
+
+	store, err := analyzer.OpenWorkspaceStore(defaults.RootPath)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	defer store.Close()
+
+	provider, err := analyzer.NewEmbeddingProviderFromConfig(defaults.Config.Embeddings)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	queryEmbedding, err := analyzer.EmbedSearchQuery(ctx, provider, query)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	symbols, err := store.SemanticSearch(queryEmbedding, limit)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	resultSymbols := make([]SemanticSearchSymbol, 0, len(symbols))
+	for _, symbol := range symbols {
+		resultSymbols = append(resultSymbols, SemanticSearchSymbol{
+			ID:          symbol.ID,
+			Type:        symbol.Type,
+			PackagePath: symbol.PackagePath,
+			Name:        symbol.Name,
+			FilePath:    symbol.FilePath,
+			LineStart:   symbol.LineStart,
+			LineEnd:     symbol.LineEnd,
+			Source:      truncateStringBytes(symbol.Source, maxSourceBytes),
+		})
+	}
+
+	return nil, &SemanticSearchResult{
+		Query:   query,
+		Limit:   limit,
+		Total:   len(resultSymbols),
+		Symbols: resultSymbols,
+		Meta: map[string]any{
+			"source":     "sqlite_shadow",
+			"freshness":  "shadow",
+			"read_path":  "rag_index",
+			"model":      analyzer.EmbeddingProviderLabel(provider),
+			"dimensions": len(queryEmbedding),
+		},
+	}, nil
 }
 
 func handleSuggestAnalysisWorkflow(ctx context.Context, req *mcp.CallToolRequest, input SuggestAnalysisWorkflowInput) (*mcp.CallToolResult, *SuggestAnalysisWorkflowResult, error) {
@@ -1113,6 +1526,13 @@ func toolError(err error) *mcp.CallToolResult {
 		IsError: true,
 		Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
 	}
+}
+
+func truncateStringBytes(value string, maxBytes int) string {
+	if maxBytes <= 0 || len(value) <= maxBytes {
+		return value
+	}
+	return value[:maxBytes]
 }
 
 type analysisDefaults struct {

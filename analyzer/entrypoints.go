@@ -2,9 +2,10 @@ package analyzer
 
 import (
 	"fmt"
+	"go/ast"
 	"sort"
 
-	"golang.org/x/tools/go/ssa"
+	"golang.org/x/tools/go/packages"
 )
 
 // EntrypointKind classifies an entrypoint.
@@ -40,105 +41,25 @@ type EntrypointsResult struct {
 	Truncated           bool         `json:"truncated"`
 }
 
-// ListEntrypoints scans the loaded SSA program for main functions, init
-// functions, and goroutine-spawn sites (go statements), returning each as an
-// Entrypoint with source location.
+// ListEntrypoints scans syntax for main functions, init functions, and
+// goroutine-spawn sites (go statements), returning each as an Entrypoint with
+// source location. It intentionally stays off SSA because entrypoint discovery
+// only needs AST-level information.
 func ListEntrypoints(ws *Workspace, dir, pattern string) (*EntrypointsResult, error) {
 	return ListEntrypointsWithOptions(ws, dir, pattern, QueryOptions{})
 }
 
 func ListEntrypointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*EntrypointsResult, error) {
-	prog, err := ws.GetOrLoadSSA(dir, pattern)
+	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
 	result := &EntrypointsResult{
-		Entrypoints: []Entrypoint{},
+		Entrypoints: append([]Entrypoint(nil), prog.entrypoints...),
 	}
 
-	seenFunc := make(map[string]bool)
-
-	// Pass 1: main and init functions.
-	for _, fn := range prog.SSAFuncs {
-		if fn == nil || fn.Package() == nil || fn.Package().Pkg == nil {
-			continue
-		}
-		pkgPath := fn.Package().Pkg.Path()
-		pkgName := fn.Package().Pkg.Name()
-
-		var kind EntrypointKind
-		switch {
-		case fn.Name() == "main" && pkgName == "main":
-			kind = EntrypointMain
-		case fn.Name() == "init":
-			kind = EntrypointInit
-		default:
-			continue
-		}
-
-		key := string(kind) + ":" + fn.String()
-		if seenFunc[key] {
-			continue
-		}
-		seenFunc[key] = true
-
-		file, line := ssaFuncPos(fn)
-		result.Entrypoints = append(result.Entrypoints, Entrypoint{
-			Kind:     kind,
-			Function: fn.String(),
-			Package:  pkgPath,
-			File:     file,
-			Line:     line,
-			Anchor:   contextAnchor(file, line, fn.Name()),
-		})
-	}
-
-	// Pass 2: goroutine spawn sites (go statements).
-	seenGo := make(map[string]bool)
-	for _, fn := range prog.SSAFuncs {
-		if fn == nil || fn.Blocks == nil || fn.Package() == nil || fn.Package().Pkg == nil {
-			continue
-		}
-		pkgPath := fn.Package().Pkg.Path()
-
-		for _, blk := range fn.Blocks {
-			for _, instr := range blk.Instrs {
-				goInstr, ok := instr.(*ssa.Go)
-				if !ok {
-					continue
-				}
-
-				spawned := goroutineTarget(goInstr, fn)
-				goKey := pkgPath + ":" + spawned
-				if seenGo[goKey] {
-					continue
-				}
-				seenGo[goKey] = true
-
-				pos := fn.Prog.Fset.Position(goInstr.Pos())
-				result.Entrypoints = append(result.Entrypoints, Entrypoint{
-					Kind:     EntrypointGoroutine,
-					Function: spawned,
-					Package:  pkgPath,
-					File:     pos.Filename,
-					Line:     pos.Line,
-					Anchor:   contextAnchor(pos.Filename, pos.Line, spawned),
-				})
-			}
-		}
-	}
-
-	sort.Slice(result.Entrypoints, func(i, j int) bool {
-		a, b := result.Entrypoints[i], result.Entrypoints[j]
-		if a.Kind != b.Kind {
-			return a.Kind < b.Kind
-		}
-		if a.Package != b.Package {
-			return a.Package < b.Package
-		}
-		return a.Function < b.Function
-	})
+	sortEntrypoints(result.Entrypoints)
 
 	result.Total = len(result.Entrypoints)
 	result.TotalBeforeTruncate = result.Total
@@ -158,28 +79,151 @@ func ListEntrypointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOp
 	return result, nil
 }
 
+func extractEntrypointsFromSyntax(pkgs []*packages.Package) []Entrypoint {
+	entrypoints := make([]Entrypoint, 0, 16)
+	seenFunc := make(map[string]bool)
+	seenGo := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg == nil || pkg.PkgPath == "" || pkg.Fset == nil {
+			continue
+		}
+		for _, file := range pkg.Syntax {
+			collectSyntaxEntrypoints(pkg, file, seenFunc, seenGo, &entrypoints)
+		}
+	}
+	sortEntrypoints(entrypoints)
+	return entrypoints
+}
+
+func sortEntrypoints(entrypoints []Entrypoint) {
+	sort.Slice(entrypoints, func(i, j int) bool {
+		a, b := entrypoints[i], entrypoints[j]
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.Package != b.Package {
+			return a.Package < b.Package
+		}
+		return a.Function < b.Function
+	})
+}
+
 func entrypointKey(e Entrypoint) string {
 	return string(e.Kind) + "|" + e.Package + "|" + e.Function + "|" + e.File + ":" + fmt.Sprintf("%d", e.Line)
 }
 
-func ssaFuncPos(fn *ssa.Function) (string, int) {
-	if fn.Prog == nil {
-		return "", 0
+func collectSyntaxEntrypoints(pkg *packages.Package, file *ast.File, seenFunc, seenGo map[string]bool, out *[]Entrypoint) {
+	if file == nil {
+		return
 	}
-	pos := fn.Prog.Fset.Position(fn.Pos())
-	return pos.Filename, pos.Line
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil {
+			continue
+		}
+		fnName := syntaxFunctionName(pkg, fn)
+		var kind EntrypointKind
+		switch {
+		case fn.Name.Name == "main" && pkg.Name == "main":
+			kind = EntrypointMain
+		case fn.Name.Name == "init":
+			kind = EntrypointInit
+		default:
+			kind = ""
+		}
+		if kind != "" {
+			key := string(kind) + ":" + fnName
+			if !seenFunc[key] {
+				seenFunc[key] = true
+				pos := pkg.Fset.Position(fn.Pos())
+				*out = append(*out, Entrypoint{
+					Kind:     kind,
+					Function: fnName,
+					Package:  pkg.PkgPath,
+					File:     pos.Filename,
+					Line:     pos.Line,
+					Anchor:   contextAnchor(pos.Filename, pos.Line, fn.Name.Name),
+				})
+			}
+		}
+		if fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			goStmt, ok := n.(*ast.GoStmt)
+			if !ok {
+				return true
+			}
+			spawned := syntaxGoroutineTarget(pkg, goStmt, fn)
+			pos := pkg.Fset.Position(goStmt.Pos())
+			key := pkg.PkgPath + ":" + spawned + ":" + pos.Filename + ":" + fmt.Sprintf("%d", pos.Line)
+			if seenGo[key] {
+				return true
+			}
+			seenGo[key] = true
+			*out = append(*out, Entrypoint{
+				Kind:     EntrypointGoroutine,
+				Function: spawned,
+				Package:  pkg.PkgPath,
+				File:     pos.Filename,
+				Line:     pos.Line,
+				Anchor:   contextAnchor(pos.Filename, pos.Line, spawned),
+			})
+			return true
+		})
+	}
 }
 
-func goroutineTarget(g *ssa.Go, enclosing *ssa.Function) string {
-	switch callee := g.Call.Value.(type) {
-	case *ssa.Function:
-		return callee.String()
-	case *ssa.MakeClosure:
-		if fn, ok := callee.Fn.(*ssa.Function); ok {
-			return fn.String()
-		}
-		return "<closure in " + enclosing.String() + ">"
+func syntaxFunctionName(pkg *packages.Package, fn *ast.FuncDecl) string {
+	if fn == nil || fn.Name == nil {
+		return ""
+	}
+	name := pkg.PkgPath + "."
+	if fn.Recv != nil && len(fn.Recv.List) > 0 {
+		name += receiverTypeExprName(fn.Recv.List[0].Type) + "."
+	}
+	return name + fn.Name.Name
+}
+
+func syntaxGoroutineTarget(pkg *packages.Package, goStmt *ast.GoStmt, enclosing *ast.FuncDecl) string {
+	if goStmt == nil || goStmt.Call == nil {
+		return "<dynamic in " + syntaxFunctionName(pkg, enclosing) + ">"
+	}
+	switch fun := goStmt.Call.Fun.(type) {
+	case *ast.Ident:
+		return pkg.PkgPath + "." + fun.Name
+	case *ast.SelectorExpr:
+		return selectorExprName(fun)
+	case *ast.FuncLit:
+		return "<closure in " + syntaxFunctionName(pkg, enclosing) + ">"
 	default:
-		return "<dynamic in " + enclosing.String() + ">"
+		return "<dynamic in " + syntaxFunctionName(pkg, enclosing) + ">"
+	}
+}
+
+func selectorExprName(sel *ast.SelectorExpr) string {
+	if sel == nil || sel.Sel == nil {
+		return ""
+	}
+	if ident, ok := sel.X.(*ast.Ident); ok {
+		return ident.Name + "." + sel.Sel.Name
+	}
+	return sel.Sel.Name
+}
+
+func receiverTypeExprName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.StarExpr:
+		return receiverTypeExprName(e.X)
+	case *ast.SelectorExpr:
+		return selectorExprName(e)
+	case *ast.IndexExpr:
+		return receiverTypeExprName(e.X)
+	case *ast.IndexListExpr:
+		return receiverTypeExprName(e.X)
+	default:
+		return ""
 	}
 }

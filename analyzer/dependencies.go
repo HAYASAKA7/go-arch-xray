@@ -2,7 +2,6 @@ package analyzer
 
 import (
 	"fmt"
-	"sort"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -45,49 +44,33 @@ func GetPackageDependenciesWithOptions(ws *Workspace, dir, pattern string, inclu
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
 
+	store, err := OpenWorkspaceStore(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	rows, err := store.GetPackageDependencies(includeStdlib)
+	if err != nil {
+		return nil, err
+	}
+
 	result := &DependencyResult{
 		Offset:   opts.Offset,
 		Limit:    opts.Limit,
 		MaxItems: opts.MaxItems,
-		Packages: make([]PackageDependency, 0, len(prog.Packages)),
+		Packages: make([]PackageDependency, 0, len(rows)),
 	}
-
-	rootPaths := make(map[string]bool, len(prog.Packages))
-	for _, pkg := range prog.Packages {
-		rootPaths[pkg.PkgPath] = true
-	}
-
-	for _, pkg := range prog.Packages {
-		imports := make([]string, 0, len(pkg.Imports))
-		seen := make(map[string]bool, len(pkg.Imports))
-		for _, imp := range pkg.Imports {
-			if imp == nil || imp.PkgPath == "" {
-				continue
-			}
-			if !includeStdlib && !rootPaths[imp.PkgPath] && imp.Module == nil && isStdlib(imp.PkgPath) {
-				continue
-			}
-			if seen[imp.PkgPath] {
-				continue
-			}
-			seen[imp.PkgPath] = true
-			imports = append(imports, imp.PkgPath)
-		}
-		sort.Strings(imports)
-
-		file, line := packageAnchorLocation(pkg)
+	for _, row := range rows {
+		file := packageAnchorLocationForPath(prog, row.Package)
 		result.Packages = append(result.Packages, PackageDependency{
-			Package: pkg.PkgPath,
-			Imports: imports,
+			Package: row.Package,
+			Imports: append([]string(nil), row.Imports...),
 			File:    file,
-			Line:    line,
-			Anchor:  contextAnchor(file, line, pkg.PkgPath),
+			Line:    1,
+			Anchor:  contextAnchor(file, 1, row.Package),
 		})
 	}
-
-	sort.Slice(result.Packages, func(i, j int) bool {
-		return result.Packages[i].Package < result.Packages[j].Package
-	})
 
 	result.Summary = summarizeDependencies(result.Packages, opts.Summary)
 	window, total, truncated, hasMore, nextCursor, serr := streamOrWindow(result.Packages, "package_dependencies:"+dir+"|"+pattern, packageDependencyKey, opts)
@@ -151,4 +134,17 @@ func packageAnchorLocation(pkg *packages.Package) (string, int) {
 		return "", 0
 	}
 	return pkg.CompiledGoFiles[0], 1
+}
+
+func packageAnchorLocationForPath(prog *LoadedProgram, pkgPath string) string {
+	if prog == nil {
+		return ""
+	}
+	for _, pkg := range prog.Packages {
+		if pkg != nil && pkg.PkgPath == pkgPath {
+			file, _ := packageAnchorLocation(pkg)
+			return file
+		}
+	}
+	return ""
 }

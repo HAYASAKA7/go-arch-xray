@@ -80,6 +80,18 @@ type LoadedProgram struct {
 	// without re-parsing source files.
 	complexityMetrics []FunctionComplexity
 
+	// fileMetas caches per-file hashes and timestamps captured during load.
+	fileMetas []FileMeta
+
+	// codeSymbols and symbolHashes cache top-level declarations captured during
+	// load for shadow RAG storage before package syntax is cleared.
+	codeSymbols  []CodeSymbol
+	symbolHashes []SymbolHash
+
+	// entrypoints caches main/init/goroutine entrypoints captured during load
+	// before package syntax is cleared. Used by ListEntrypoints without SSA.
+	entrypoints []Entrypoint
+
 	// concurrencySummaries caches per-function access summaries captured lazily
 	// for DetectConcurrencyRisks and related analyses.
 	concurrencyOnce      sync.Once
@@ -334,6 +346,9 @@ func (w *Workspace) getOrLoad(dir, pattern string, mode LoadMode) (*LoadedProgra
 		if err != nil {
 			return nil, err
 		}
+		if err := ShadowStoreProgram(dir, prog); err != nil {
+			logger.Printf("shadow sqlite snapshot failed for %s patterns=%v: %v", dir, patterns, err)
+		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		now := time.Now()
@@ -415,12 +430,13 @@ func (w *Workspace) Reload(dir, pattern string) (*LoadedProgram, error) {
 
 func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, error) {
 	patterns = normalizePatternsForDir(dir, patterns)
+	filter, _ := sourceFilterForDir(dir)
 
 	var pkgs []*packages.Package
 	var err error
 
 	if mode == LoadModeSyntax {
-		pkgs, err = loadSyntaxOnlyFast(dir, patterns)
+		pkgs, err = loadSyntaxOnlyFast(dir, patterns, filter)
 	} else {
 		pkgMode := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax
 		if mode >= LoadModeTypes {
@@ -520,10 +536,14 @@ func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, 
 	var grpcCache grpcExtraction
 	var methodFingerprintsCache []MethodFingerprint
 	var complexityMetricsCache []FunctionComplexity
+	var fileMetasCache []FileMeta
+	var codeSymbolsCache []CodeSymbol
+	var symbolHashesCache []SymbolHash
+	var entrypointsCache []Entrypoint
 	var ormModelsCache []OrmModel
 
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(8)
 
 	go func() {
 		defer wg.Done()
@@ -540,6 +560,18 @@ func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, 
 	go func() {
 		defer wg.Done()
 		complexityMetricsCache = extractComplexityFromSyntax(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		fileMetasCache = extractFileMetasFromPackages(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		codeSymbolsCache, symbolHashesCache = ExtractCodeSymbolsFromSyntax(pkgs)
+	}()
+	go func() {
+		defer wg.Done()
+		entrypointsCache = extractEntrypointsFromSyntax(pkgs)
 	}()
 	go func() {
 		defer wg.Done()
@@ -594,6 +626,10 @@ func loadProgram(dir string, patterns []string, mode LoadMode) (*LoadedProgram, 
 		grpcRegistrations:    grpcCache.registrations,
 		methodFingerprints:   methodFingerprintsCache,
 		complexityMetrics:    complexityMetricsCache,
+		fileMetas:            fileMetasCache,
+		codeSymbols:          codeSymbolsCache,
+		symbolHashes:         symbolHashesCache,
+		entrypoints:          entrypointsCache,
 		ormModels:            ormModelsCache,
 		concurrencySummaries: nil,
 	}, nil
@@ -742,7 +778,7 @@ func AllLoadedPackages(roots []*packages.Package) map[string]*packages.Package {
 	return out
 }
 
-func loadSyntaxOnlyFast(dir string, patterns []string) ([]*packages.Package, error) {
+func loadSyntaxOnlyFast(dir string, patterns []string, filter *SourceFilter) ([]*packages.Package, error) {
 	fset := token.NewFileSet()
 	pkgs := make(map[string]*packages.Package)
 
@@ -776,7 +812,17 @@ func loadSyntaxOnlyFast(dir string, patterns []string) ([]*packages.Package, err
 				}
 				return nil
 			}
-			if !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
+			if !strings.HasSuffix(d.Name(), ".go") {
+				return nil
+			}
+			relPath, relErr := filepath.Rel(dir, path)
+			if relErr != nil {
+				relPath = filepath.ToSlash(path)
+			}
+			if filter != nil && !filter.ShouldProcess(relPath) {
+				return nil
+			}
+			if filter == nil && strings.HasSuffix(d.Name(), "_test.go") {
 				return nil
 			}
 
@@ -841,4 +887,15 @@ func loadSyntaxOnlyFast(dir string, patterns []string) ([]*packages.Package, err
 		result = append(result, pkg)
 	}
 	return result, nil
+}
+
+func sourceFilterForDir(dir string) (*SourceFilter, error) {
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(config.Sources.Include) == 0 && len(config.Sources.Exclude) == 0 {
+		return nil, nil
+	}
+	return NewSourceFilter(config.Sources.Include, config.Sources.Exclude), nil
 }

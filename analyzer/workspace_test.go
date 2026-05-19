@@ -351,7 +351,7 @@ func TestLoadSyntaxOnlyFast(t *testing.T) {
 	os.MkdirAll(filepath.Join(dir, "sub", "pkg"), 0755)
 	os.WriteFile(filepath.Join(dir, "sub", "pkg", "lib.go"), []byte("package pkg\n\nfunc Run() {}"), 0644)
 
-	pkgs, err := loadSyntaxOnlyFast(dir, []string{"./..."})
+	pkgs, err := loadSyntaxOnlyFast(dir, []string{"./..."}, nil)
 	if err != nil {
 		t.Fatalf("loadSyntaxOnlyFast failed: %v", err)
 	}
@@ -383,5 +383,38 @@ func TestLoadSyntaxOnlyFast(t *testing.T) {
 
 	if !foundMain || !foundSub {
 		t.Errorf("missing packages: main=%v, sub=%v", foundMain, foundSub)
+	}
+}
+
+func TestLoadSyntaxOnlyFast_AppliesSourceFilter(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module my/filter/mod\n\ngo 1.23"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "keep.go"), []byte("package main\n\nfunc Keep() {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skip_test.go"), []byte("package main\n\nfunc TestSkip() {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "vendor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vendor", "skip.go"), []byte("package vendor\n\nfunc Skip() {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, WorkspaceConfigFile), []byte("version: 1\nsources:\n  exclude:\n    - \"*_test.go\"\n    - vendor/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pkgs, err := loadSyntaxOnlyFast(dir, []string{"./..."}, NewSourceFilter([]string{}, []string{"*_test.go", "vendor/"}))
+	if err != nil {
+		t.Fatalf("loadSyntaxOnlyFast failed: %v", err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("expected 1 package after filtering, got %d", len(pkgs))
+	}
+	if len(pkgs[0].Syntax) != 1 {
+		t.Fatalf("expected only kept file to remain, got %d files", len(pkgs[0].Syntax))
 	}
 }

@@ -93,3 +93,30 @@ func main() {
 		}
 	})
 }
+
+func TestListEntrypoints_UsesSyntaxOnlyWorkspaceLoad(t *testing.T) {
+	dir := createDependencyTestModule(t, "ep_syntax_only", map[string]string{
+		"main.go": `package main
+
+func main() {
+	go func() {}()
+}
+`,
+	})
+	ws := newTestWorkspace(t)
+
+	if _, err := ListEntrypoints(ws, dir, "./..."); err != nil {
+		t.Fatalf("ListEntrypoints failed: %v", err)
+	}
+
+	prog, err := ws.GetOrLoadSyntaxOnly(dir, "./...")
+	if err != nil {
+		t.Fatalf("GetOrLoadSyntaxOnly failed: %v", err)
+	}
+	if prog.SSA != nil {
+		t.Fatal("expected ListEntrypoints to avoid SSA construction")
+	}
+	if prog.Mode != LoadModeSyntax {
+		t.Fatalf("expected syntax-only load mode, got %d", prog.Mode)
+	}
+}
