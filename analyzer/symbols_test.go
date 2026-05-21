@@ -98,12 +98,12 @@ func NewServer() Server {
 	stale, err := store.GetStaleSymbolHashes([]SymbolHash{{
 		SymbolID:         found.ID,
 		SourceHash:       SymbolSourceHash(found.Source),
-		EmbeddingVersion: defaultEmbeddingVersion,
+		EmbeddingVersion: 0,
 	}})
 	if err != nil {
 		t.Fatalf("GetStaleSymbolHashes failed: %v", err)
 	}
 	if len(stale) != 0 {
-		t.Fatalf("expected NewServer symbol hash to be current, got stale %#v", stale)
+		t.Fatalf("expected NewServer symbol hash version 0 to be current, got stale %#v", stale)
 	}
 }

@@ -33,7 +33,7 @@
 - `semantic_search`: Searches the project-local SQLite index for code symbols
   related to a natural-language or code query. Returns symbol source snippets,
   file paths, line ranges, package paths, and metadata suitable for RAG
-  context assembly. In 0.7.0 it reads from the `code_symbols` table through
+  context assembly. In 0.7.1 it reads from the `code_symbols` table through
   sqlite-vec; embeddings are selected from config with
   `embeddings.provider: local`, `api`, or `none`.
 
@@ -54,7 +54,7 @@
 
 - On startup, the server creates a project-local `.gax/` workspace and opens
   `.gax/cache.db` in WAL mode.
-- In 0.7.0, SQLite backs the fast-path tools (`get_package_dependencies`,
+- In 0.7.1, SQLite backs the fast-path tools (`get_package_dependencies`,
   `list_http_routes`, `list_grpc_endpoints`, and `semantic_search`) while
   background sync validates persisted snapshots, file hashes, symbol hashes,
   and local deterministic embeddings. SSA-heavy tools still use the in-memory
@@ -71,6 +71,7 @@ need client-specific skill files to discover good tool workflows.
 
 Prompts:
 
+- `go_embeddings_setup`
 - `go_onboarding`
 - `go_refactor_precheck`
 - `go_cleanup`
@@ -81,6 +82,7 @@ Prompts:
 Resources:
 
 - `go-arch-xray://agent-guide`
+- `go-arch-xray://embeddings-setup`
 - `go-arch-xray://workflow/onboarding`
 - `go-arch-xray://workflow/refactor_precheck`
 - `go-arch-xray://workflow/cleanup`

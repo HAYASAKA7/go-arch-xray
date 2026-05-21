@@ -102,6 +102,43 @@ func TestInspectWorkspaceConfig_RecommendedNextStep(t *testing.T) {
 	}
 }
 
+func TestInspectEmbeddingsSettings_ReportsSetupState(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	_ = statePath
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+
+	inspection, err := InspectEmbeddingsSettings(dir)
+	if err != nil {
+		t.Fatalf("inspect embeddings: %v", err)
+	}
+	if !inspection.EmbeddingsSetupRequired {
+		t.Fatalf("expected embeddings setup to be required, got %+v", inspection)
+	}
+	if inspection.LocalConfigYAML == "" || inspection.APIConfigYAML == "" {
+		t.Fatalf("expected config examples, got %+v", inspection)
+	}
+	if !strings.Contains(inspection.RecommendedNextStep, "call this tool with dismiss=true") {
+		t.Fatalf("expected actionable next step, got %q", inspection.RecommendedNextStep)
+	}
+}
+
+func TestUserWorkspaceStateSaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	state := &UserWorkspaceState{Version: 1, Embeddings: UserEmbeddingsState{Dismissed: true}}
+	if err := SaveUserWorkspaceStateToPath(path, state); err != nil {
+		t.Fatalf("save user state: %v", err)
+	}
+	got, err := LoadUserWorkspaceStateFromPath(path)
+	if err != nil {
+		t.Fatalf("load user state: %v", err)
+	}
+	if !got.Embeddings.Dismissed {
+		t.Fatalf("expected dismissed state to round-trip, got %+v", got)
+	}
+}
+
 func TestInitWorkspaceConfig_DoesNotOverwriteExistingConfig(t *testing.T) {
 	dir := t.TempDir()
 	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")

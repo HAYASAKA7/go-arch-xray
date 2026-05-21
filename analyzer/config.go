@@ -107,17 +107,48 @@ type ConfigLifecycle struct {
 }
 
 type WorkspaceConfigInspection struct {
-	RootPath            string          `json:"root_path"`
-	ConfigPath          string          `json:"config_path"`
-	ConfigExists        bool            `json:"config_exists"`
-	UserConfigPath      string          `json:"user_config_path,omitempty"`
-	UserConfigExists    bool            `json:"user_config_exists"`
-	GoWorkPath          string          `json:"go_work_path,omitempty"`
-	GoModPath           string          `json:"go_mod_path,omitempty"`
-	SuggestedConfig     WorkspaceConfig `json:"suggested_config"`
-	EffectiveConfig     WorkspaceConfig `json:"effective_config"`
-	RecommendedNextStep string          `json:"recommended_next_step,omitempty"`
-	Notes               []string        `json:"notes,omitempty"`
+	RootPath                 string          `json:"root_path"`
+	ConfigPath               string          `json:"config_path"`
+	ConfigExists             bool            `json:"config_exists"`
+	UserConfigPath           string          `json:"user_config_path,omitempty"`
+	UserConfigExists         bool            `json:"user_config_exists"`
+	UserStatePath            string          `json:"user_state_path,omitempty"`
+	UserStateExists          bool            `json:"user_state_exists"`
+	GoWorkPath               string          `json:"go_work_path,omitempty"`
+	GoModPath                string          `json:"go_mod_path,omitempty"`
+	SuggestedConfig          WorkspaceConfig `json:"suggested_config"`
+	EffectiveConfig          WorkspaceConfig `json:"effective_config"`
+	EmbeddingsConfigured     bool            `json:"embeddings_configured"`
+	EmbeddingsSetupRequired  bool            `json:"embeddings_setup_required"`
+	EmbeddingsSetupDismissed bool            `json:"embeddings_setup_dismissed"`
+	EmbeddingsStatePath      string          `json:"embeddings_state_path,omitempty"`
+	RecommendedNextStep      string          `json:"recommended_next_step,omitempty"`
+	Notes                    []string        `json:"notes,omitempty"`
+}
+
+type EmbeddingsSettingsInspection struct {
+	RootPath                 string          `json:"root_path"`
+	ConfigPath               string          `json:"config_path"`
+	ConfigExists             bool            `json:"config_exists"`
+	UserConfigPath           string          `json:"user_config_path,omitempty"`
+	UserConfigExists         bool            `json:"user_config_exists"`
+	UserStatePath            string          `json:"user_state_path,omitempty"`
+	UserStateExists          bool            `json:"user_state_exists"`
+	EmbeddingsConfigured     bool            `json:"embeddings_configured"`
+	EmbeddingsSetupRequired  bool            `json:"embeddings_setup_required"`
+	EmbeddingsSetupDismissed bool            `json:"embeddings_setup_dismissed"`
+	EffectiveConfig          WorkspaceConfig `json:"effective_config"`
+	LocalConfigYAML          string          `json:"local_config_yaml,omitempty"`
+	APIConfigYAML            string          `json:"api_config_yaml,omitempty"`
+	RecommendedNextStep      string          `json:"recommended_next_step,omitempty"`
+	Notes                    []string        `json:"notes,omitempty"`
+}
+
+type workspaceConfigResolution struct {
+	UserExists           bool
+	RepoExists           bool
+	ProjectExists        bool
+	EmbeddingsConfigured bool
 }
 
 type WorkspaceConfigInitResult struct {
@@ -136,21 +167,32 @@ func InspectWorkspaceConfig(root string) (*WorkspaceConfigInspection, error) {
 	if err != nil {
 		return nil, err
 	}
-	effective, repoExists, userExists, err := effectiveWorkspaceConfigWithSources(root, suggested)
+	effective, resolution, err := effectiveWorkspaceConfigWithSources(root, suggested)
 	if err != nil {
 		return nil, err
 	}
+	setupState, err := LoadUserWorkspaceState()
+	if err != nil {
+		return nil, err
+	}
+	setupDismissed := setupState != nil && setupState.Embeddings.Dismissed
 
 	inspection := &WorkspaceConfigInspection{
-		RootPath:            root,
-		ConfigPath:          ProjectWorkspaceConfigPath(root),
-		ConfigExists:        repoExists || pathExists(ProjectWorkspaceConfigPath(root)),
-		UserConfigPath:      UserWorkspaceConfigPath(),
-		UserConfigExists:    userExists,
-		SuggestedConfig:     suggested,
-		EffectiveConfig:     effective,
-		RecommendedNextStep: configRecommendedNextStep(repoExists),
-		Notes:               configNotes(suggested, repoExists, userExists),
+		RootPath:                 root,
+		ConfigPath:               ProjectWorkspaceConfigPath(root),
+		ConfigExists:             resolution.RepoExists || resolution.ProjectExists,
+		UserConfigPath:           UserWorkspaceConfigPath(),
+		UserConfigExists:         resolution.UserExists,
+		UserStatePath:            UserWorkspaceStatePath(),
+		UserStateExists:          pathExists(UserWorkspaceStatePath()),
+		SuggestedConfig:          suggested,
+		EffectiveConfig:          effective,
+		EmbeddingsConfigured:     resolution.EmbeddingsConfigured,
+		EmbeddingsSetupRequired:  !resolution.EmbeddingsConfigured && !setupDismissed,
+		EmbeddingsSetupDismissed: setupDismissed,
+		EmbeddingsStatePath:      UserWorkspaceStatePath(),
+		RecommendedNextStep:      configRecommendedNextStep(resolution.RepoExists, resolution.EmbeddingsConfigured, setupDismissed),
+		Notes:                    configNotes(suggested, resolution.RepoExists, resolution.UserExists),
 	}
 	if suggested.Workspace.Mode == "go_work" {
 		inspection.GoWorkPath = filepath.Join(root, suggested.Workspace.File)
@@ -159,6 +201,76 @@ func InspectWorkspaceConfig(root string) (*WorkspaceConfigInspection, error) {
 		inspection.GoModPath = filepath.Join(root, suggested.Workspace.File)
 	}
 	return inspection, nil
+}
+
+func InspectEmbeddingsSettings(root string) (*EmbeddingsSettingsInspection, error) {
+	root = filepath.Clean(root)
+	suggested, err := SuggestWorkspaceConfig(root)
+	if err != nil {
+		return nil, err
+	}
+	effective, resolution, err := effectiveWorkspaceConfigWithSources(root, suggested)
+	if err != nil {
+		return nil, err
+	}
+	state, err := LoadUserWorkspaceState()
+	if err != nil {
+		return nil, err
+	}
+	localExample, err := MarshalWorkspaceConfig(WorkspaceConfig{
+		Version: 1,
+		Embeddings: ConfigEmbeddings{
+			Provider: "local",
+			Local: ConfigEmbeddingEndpoint{
+				Endpoint: "http://localhost:11434/api/embeddings",
+				Model:    "bge-m3",
+			},
+			BatchSize: 50,
+			ChunkSize: 500,
+			Dimension: 1024,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	apiExample, err := MarshalWorkspaceConfig(WorkspaceConfig{
+		Version: 1,
+		Embeddings: ConfigEmbeddings{
+			Provider: "api",
+			API: ConfigEmbeddingAPI{
+				BaseURL:   "https://api.openai.com/v1",
+				Model:     "text-embedding-3-small",
+				APIKeyEnv: "OPENAI_API_KEY",
+			},
+			BatchSize: 50,
+			ChunkSize: 500,
+			Dimension: 1536,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &EmbeddingsSettingsInspection{
+		RootPath:                 root,
+		ConfigPath:               ProjectWorkspaceConfigPath(root),
+		ConfigExists:             resolution.RepoExists || resolution.ProjectExists,
+		UserConfigPath:           UserWorkspaceConfigPath(),
+		UserConfigExists:         resolution.UserExists,
+		UserStatePath:            UserWorkspaceStatePath(),
+		UserStateExists:          pathExists(UserWorkspaceStatePath()),
+		EmbeddingsConfigured:     resolution.EmbeddingsConfigured,
+		EmbeddingsSetupRequired:  !resolution.EmbeddingsConfigured && (state == nil || !state.Embeddings.Dismissed),
+		EmbeddingsSetupDismissed: state != nil && state.Embeddings.Dismissed,
+		EffectiveConfig:          effective,
+		LocalConfigYAML:          localExample,
+		APIConfigYAML:            apiExample,
+		RecommendedNextStep:      EmbeddingsRecommendedNextStep(resolution.EmbeddingsConfigured, state != nil && state.Embeddings.Dismissed),
+		Notes: []string{
+			"user-local config is read from the OS config directory or GO_ARCH_XRAY_USER_CONFIG",
+			".gax/config.yml still overrides repo config for project-local overrides",
+			"inspect_workspace_config reports the same embedding setup state for startup checks",
+		},
+	}, nil
 }
 
 func SuggestWorkspaceConfig(root string) (WorkspaceConfig, error) {
@@ -195,7 +307,7 @@ func EffectiveWorkspaceConfig(root string) (WorkspaceConfig, error) {
 	if err != nil {
 		return WorkspaceConfig{}, err
 	}
-	effective, _, _, err := effectiveWorkspaceConfigWithSources(root, suggested)
+	effective, _, err := effectiveWorkspaceConfigWithSources(root, suggested)
 	return effective, err
 }
 
@@ -273,38 +385,51 @@ func UserWorkspaceConfigPath() string {
 	return filepath.Join(dir, "go-arch-xray", "config.yml")
 }
 
+func UserWorkspaceStatePath() string {
+	base := userWorkspaceBaseDir()
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "state.json")
+}
+
 func ConfigPackagePatterns(config WorkspaceConfig) []string {
 	config = normalizeWorkspaceConfig(config)
 	return append([]string(nil), config.PackagePatterns...)
 }
 
-func effectiveWorkspaceConfigWithSources(root string, suggested WorkspaceConfig) (WorkspaceConfig, bool, bool, error) {
+func effectiveWorkspaceConfigWithSources(root string, suggested WorkspaceConfig) (WorkspaceConfig, workspaceConfigResolution, error) {
 	effective := suggested
-	userConfig, userExists, err := loadOptionalWorkspaceConfig(UserWorkspaceConfigPath())
+	var resolution workspaceConfigResolution
+	userConfig, userExists, err := loadOptionalWorkspaceConfigWithRaw(UserWorkspaceConfigPath())
 	if err != nil {
-		return WorkspaceConfig{}, false, false, err
+		return WorkspaceConfig{}, resolution, err
 	}
 	if userExists {
 		effective = mergeWorkspaceConfig(effective, userConfig)
+		resolution.UserExists = true
 	}
-	repoConfig, repoExists, err := loadOptionalWorkspaceConfig(RepoWorkspaceConfigPath(root))
+	repoConfig, repoExists, err := loadOptionalWorkspaceConfigWithRaw(RepoWorkspaceConfigPath(root))
 	if err != nil {
-		return WorkspaceConfig{}, false, false, err
+		return WorkspaceConfig{}, resolution, err
 	}
 	if repoExists {
 		effective = mergeWorkspaceConfig(effective, repoConfig)
+		resolution.RepoExists = true
 	}
-	projectConfig, projectExists, err := loadOptionalWorkspaceConfig(ProjectWorkspaceConfigPath(root))
+	projectConfig, projectExists, err := loadOptionalWorkspaceConfigWithRaw(ProjectWorkspaceConfigPath(root))
 	if err != nil {
-		return WorkspaceConfig{}, false, false, err
+		return WorkspaceConfig{}, resolution, err
 	}
 	if projectExists {
 		effective = mergeWorkspaceConfig(effective, projectConfig)
+		resolution.ProjectExists = true
 	}
-	return normalizeWorkspaceConfig(effective), repoExists, userExists, nil
+	resolution.EmbeddingsConfigured = hasExplicitEmbeddingsConfig(userConfig) || hasExplicitEmbeddingsConfig(repoConfig) || hasExplicitEmbeddingsConfig(projectConfig)
+	return normalizeWorkspaceConfig(effective), resolution, nil
 }
 
-func loadOptionalWorkspaceConfig(path string) (WorkspaceConfig, bool, error) {
+func loadOptionalWorkspaceConfigWithRaw(path string) (WorkspaceConfig, bool, error) {
 	if path == "" {
 		return WorkspaceConfig{}, false, nil
 	}
@@ -319,7 +444,7 @@ func loadOptionalWorkspaceConfig(path string) (WorkspaceConfig, bool, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return WorkspaceConfig{}, false, fmt.Errorf("parse workspace config %s: %w", path, err)
 	}
-	return normalizeWorkspaceConfig(config), true, nil
+	return config, true, nil
 }
 
 func mergeWorkspaceConfig(base, overlay WorkspaceConfig) WorkspaceConfig {
@@ -680,9 +805,55 @@ func configNotes(config WorkspaceConfig, repoExists, userExists bool) []string {
 	return notes
 }
 
-func configRecommendedNextStep(repoExists bool) string {
+func configRecommendedNextStep(repoExists, embeddingsConfigured, embeddingsDismissed bool) string {
 	if repoExists {
 		return "Use effective_config for analysis; do not call init_workspace_config unless the user explicitly asks to replace the repo config."
 	}
 	return "Use effective_config for analysis now; ask the user before calling init_workspace_config to create .go-arch-xray.yml."
+}
+
+func EmbeddingsRecommendedNextStep(configured, dismissed bool) string {
+	switch {
+	case configured:
+		return "Embeddings are configured; use semantic_search or re-open this tool only to review the provider settings."
+	case dismissed:
+		return "Embeddings setup notice is dismissed; call this tool with reopen=true if you want to show it again."
+	default:
+		return "Choose either the local or API example, save it to the user config path, or call this tool with dismiss=true to stop the notice."
+	}
+}
+
+func EmbeddingsSetupRequired(configured, dismissed bool) bool {
+	return !configured && !dismissed
+}
+
+func hasExplicitEmbeddingsConfig(config WorkspaceConfig) bool {
+	e := config.Embeddings
+	if strings.TrimSpace(e.Provider) != "" {
+		return true
+	}
+	if strings.TrimSpace(e.Local.Endpoint) != "" || strings.TrimSpace(e.Local.Model) != "" || e.Local.Timeout.Duration() > 0 {
+		return true
+	}
+	if strings.TrimSpace(e.API.BaseURL) != "" || strings.TrimSpace(e.API.Model) != "" || strings.TrimSpace(e.API.APIKeyEnv) != "" || e.API.Timeout.Duration() > 0 {
+		return true
+	}
+	if e.BatchSize > 0 || e.ChunkSize > 0 || e.Dimension > 0 {
+		return true
+	}
+	return false
+}
+
+func userWorkspaceBaseDir() string {
+	if override, ok := os.LookupEnv(userConfigEnv); ok {
+		override = strings.TrimSpace(override)
+		if override != "" && !strings.EqualFold(override, "off") && !strings.EqualFold(override, "none") {
+			return filepath.Dir(override)
+		}
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "go-arch-xray")
 }

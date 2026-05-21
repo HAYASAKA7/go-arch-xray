@@ -47,6 +47,16 @@ type PersistedState struct {
 	Status   SyncStatus          `json:"status"`
 }
 
+type UserWorkspaceState struct {
+	Version    int                 `json:"version"`
+	Embeddings UserEmbeddingsState `json:"embeddings,omitempty"`
+}
+
+type UserEmbeddingsState struct {
+	Dismissed bool      `json:"dismissed"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+}
+
 func LoadState(path string) (*PersistedState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -89,6 +99,79 @@ func (s *PersistedState) Save(path string) error {
 		return fmt.Errorf("write sync state: %w", err)
 	}
 	return nil
+}
+
+func LoadUserWorkspaceState() (*UserWorkspaceState, error) {
+	path := UserWorkspaceStatePath()
+	if path == "" {
+		return &UserWorkspaceState{Version: 1}, nil
+	}
+	return LoadUserWorkspaceStateFromPath(path)
+}
+
+func LoadUserWorkspaceStateFromPath(path string) (*UserWorkspaceState, error) {
+	if path == "" {
+		return &UserWorkspaceState{Version: 1}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &UserWorkspaceState{Version: 1}, nil
+		}
+		return nil, fmt.Errorf("read user workspace state: %w", err)
+	}
+	var state UserWorkspaceState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("parse user workspace state: %w", err)
+	}
+	if state.Version == 0 {
+		state.Version = 1
+	}
+	return &state, nil
+}
+
+func SaveUserWorkspaceState(state *UserWorkspaceState) error {
+	path := UserWorkspaceStatePath()
+	if path == "" {
+		return fmt.Errorf("user workspace state path is not configured")
+	}
+	return SaveUserWorkspaceStateToPath(path, state)
+}
+
+func SaveUserWorkspaceStateToPath(path string, state *UserWorkspaceState) error {
+	if path == "" {
+		return fmt.Errorf("user workspace state path is not configured")
+	}
+	if state == nil {
+		return fmt.Errorf("user workspace state is nil")
+	}
+	if state.Version == 0 {
+		state.Version = 1
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create user workspace state dir: %w", err)
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal user workspace state: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write user workspace state: %w", err)
+	}
+	return nil
+}
+
+func UpdateUserWorkspaceEmbeddingsState(dismissed bool) (*UserWorkspaceState, error) {
+	state, err := LoadUserWorkspaceState()
+	if err != nil {
+		return nil, err
+	}
+	state.Embeddings.Dismissed = dismissed
+	state.Embeddings.UpdatedAt = time.Now().UTC()
+	if err := SaveUserWorkspaceState(state); err != nil {
+		return nil, err
+	}
+	return state, nil
 }
 
 type HashChecker struct {

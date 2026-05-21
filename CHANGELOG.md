@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-05-21
+
+### Changed
+
+- Clarified the embeddings setup flow so `semantic_search` now requires explicit provider configuration instead of silently falling back.
+- Removed confirmed dead private helpers from the analyzer storage and symbol layers.
+- Updated README and release docs to match the current embeddings and shadow-index behavior.
+
 ## [0.7.0] - 2026-05-19
 
 ### Added

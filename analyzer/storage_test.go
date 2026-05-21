@@ -285,6 +285,26 @@ func TestWorkspaceStoreSemanticSearchUsesSQLiteVecIndex(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStoreEmbeddingVersionChangesWithProvider(t *testing.T) {
+	if embeddingVersionForProvider(nil) != 0 {
+		t.Fatal("expected nil provider to map to version 0")
+	}
+	local := &LocalProvider{endpoint: "http://localhost:11434/api/embeddings", model: "bge-m3", dimension: 1024}
+	if embeddingVersionForProvider(local) == 0 {
+		t.Fatal("expected local provider version to be non-zero")
+	}
+	api := &APIProvider{baseURL: "https://api.openai.com/v1", model: "text-embedding-3-small", apiKeyEnv: "OPENAI_API_KEY", dimension: 1536}
+	if embeddingVersionForProvider(api) == embeddingVersionForProvider(local) {
+		t.Fatal("expected different providers to produce different embedding versions")
+	}
+}
+
+func TestEmbedSearchQueryRequiresConfiguredProvider(t *testing.T) {
+	if _, err := EmbedSearchQuery(context.Background(), nil, "needle"); err == nil {
+		t.Fatal("expected nil provider to be rejected")
+	}
+}
+
 func TestWorkspaceStoreDetectsStaleSymbolHashes(t *testing.T) {
 	store := openTestWorkspaceStore(t)
 

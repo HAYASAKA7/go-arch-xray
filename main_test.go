@@ -65,9 +65,37 @@ func TestServerToolDefinitions_IncludeCoreAnalysisTools(t *testing.T) {
 }
 
 func TestHandleSemanticSearch_ReturnsIndexedSymbols(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		data := make([]map[string][]float64, 0, len(req.Input))
+		for _, input := range req.Input {
+			if strings.Contains(input, "RunIndexer") || input == "RunIndexer" {
+				data = append(data, map[string][]float64{"embedding": {1, 0, 0}})
+			} else {
+				data = append(data, map[string][]float64{"embedding": {0, 1, 0}})
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+
 	dir := createMainTestModule(t, "handlerrag", map[string]string{
 		"main.go": "package main\n\nfunc RunIndexer() string { return \"indexed\" }\n\ntype SearchTarget struct{}\n",
 	})
+	writeMainTestFile(t, dir, analyzer.WorkspaceConfigFile, `version: 1
+embeddings:
+  provider: local
+  local:
+    endpoint: `+server.URL+`
+    model: test-model
+  dimension: 3
+`)
 
 	workspace = analyzer.NewWorkspace()
 	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
@@ -117,6 +145,35 @@ func TestHandleSemanticSearch_ReturnsToolErrorForEmptyQuery(t *testing.T) {
 	}
 	if toolResult == nil || !toolResult.IsError {
 		t.Fatalf("expected MCP tool error result, got %#v", toolResult)
+	}
+}
+
+func TestHandleSemanticSearch_ReturnsSetupRequiredWhenEmbeddingsMissing(t *testing.T) {
+	dir := createMainTestModule(t, "handlerragsetup", map[string]string{
+		"main.go": "package main\n\nfunc RunIndexer() string { return \"indexed\" }\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("initial load failed: %v", err)
+	}
+
+	toolResult, result, err := handleSemanticSearch(context.Background(), nil, SemanticSearchInput{
+		RootPath: dir,
+		Query:    "RunIndexer",
+		Limit:    5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result == nil || result.Total != 0 {
+		t.Fatalf("expected setup-required result with no symbols, got %#v", result)
+	}
+	if toolResult == nil || toolResult.IsError {
+		t.Fatalf("expected non-error MCP result, got %#v", toolResult)
+	}
+	if got := toolResult.Meta["status"]; got != "setup_required" {
+		t.Fatalf("expected setup_required status, got %#v", got)
 	}
 }
 
@@ -248,6 +305,25 @@ func TestHandleWorkflowPrompt_ReturnsPromptMessages(t *testing.T) {
 	}
 }
 
+func TestHandleEmbeddingsSetupPrompt_ReturnsSetupGuide(t *testing.T) {
+	result, err := handleEmbeddingsSetupPrompt(context.Background(), &mcp.GetPromptRequest{
+		Params: &mcp.GetPromptParams{Name: "go_embeddings_setup"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected prompt error: %v", err)
+	}
+	if result == nil || len(result.Messages) != 1 {
+		t.Fatalf("expected one prompt message, got %#v", result)
+	}
+	content, ok := result.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Messages[0].Content)
+	}
+	if !strings.Contains(content.Text, "inspect_embeddings_settings") || !strings.Contains(content.Text, "user-wide config") {
+		t.Fatalf("expected embeddings setup guide, got %q", content.Text)
+	}
+}
+
 func TestHandleAgentGuideResource_ReturnsGuide(t *testing.T) {
 	result, err := handleAgentGuideResource(context.Background(), &mcp.ReadResourceRequest{
 		Params: &mcp.ReadResourceParams{URI: "go-arch-xray://agent-guide"},
@@ -263,6 +339,24 @@ func TestHandleAgentGuideResource_ReturnsGuide(t *testing.T) {
 	}
 	if !strings.Contains(result.Contents[0].Text, "MCP-first") {
 		t.Fatalf("expected agent guide text, got %q", result.Contents[0].Text)
+	}
+}
+
+func TestHandleEmbeddingsSetupResource_ReturnsSetupGuide(t *testing.T) {
+	result, err := handleAgentGuideResource(context.Background(), &mcp.ReadResourceRequest{
+		Params: &mcp.ReadResourceParams{URI: "go-arch-xray://embeddings-setup"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected resource error: %v", err)
+	}
+	if result == nil || len(result.Contents) != 1 {
+		t.Fatalf("expected one resource content, got %#v", result)
+	}
+	if result.Contents[0].URI != "go-arch-xray://embeddings-setup" {
+		t.Fatalf("expected embeddings setup URI to round trip, got %q", result.Contents[0].URI)
+	}
+	if !strings.Contains(result.Contents[0].Text, "inspect_embeddings_settings") {
+		t.Fatalf("expected embeddings setup text, got %q", result.Contents[0].Text)
 	}
 }
 

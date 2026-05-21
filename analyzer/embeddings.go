@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"net/http"
 	"os"
@@ -31,10 +32,7 @@ type LocalProvider struct {
 }
 
 func (p *LocalProvider) Model() string {
-	if strings.TrimSpace(p.model) != "" {
-		return p.model
-	}
-	return "deterministic"
+	return strings.TrimSpace(p.model)
 }
 
 func (p *LocalProvider) Embed(ctx context.Context, texts []string) ([][]float64, error) {
@@ -44,12 +42,7 @@ func (p *LocalProvider) Embed(ctx context.Context, texts []string) ([][]float64,
 	if strings.TrimSpace(p.endpoint) != "" {
 		return requestEmbeddings(ctx, p.client, p.endpoint, p.model, "", texts)
 	}
-	dim := p.Dimension()
-	out := make([][]float64, len(texts))
-	for i, text := range texts {
-		out[i] = deterministicEmbedding(text, dim)
-	}
-	return out, nil
+	return nil, errors.New("embedding local endpoint is required")
 }
 
 func (p *LocalProvider) Dimension() int {
@@ -60,6 +53,15 @@ func (p *LocalProvider) Dimension() int {
 }
 
 func (p *LocalProvider) Name() string { return "local" }
+
+func (p *LocalProvider) Fingerprint() string {
+	return strings.Join([]string{
+		p.Name(),
+		strings.TrimSpace(p.endpoint),
+		strings.TrimSpace(p.model),
+		fmt.Sprint(p.Dimension()),
+	}, "|")
+}
 
 type APIProvider struct {
 	baseURL   string
@@ -89,6 +91,16 @@ func (p *APIProvider) Dimension() int { return p.dimension }
 
 func (p *APIProvider) Name() string { return "api" }
 
+func (p *APIProvider) Fingerprint() string {
+	return strings.Join([]string{
+		p.Name(),
+		strings.TrimSpace(p.baseURL),
+		strings.TrimSpace(p.model),
+		strings.TrimSpace(p.apiKeyEnv),
+		fmt.Sprint(p.Dimension()),
+	}, "|")
+}
+
 type embeddingRequest struct {
 	Model string   `json:"model,omitempty"`
 	Input []string `json:"input,omitempty"`
@@ -103,7 +115,28 @@ type embeddingData struct {
 	Embedding []float64 `json:"embedding"`
 }
 
+func hasExplicitEmbeddingsProviderConfig(config ConfigEmbeddings) bool {
+	if strings.TrimSpace(config.Provider) == "none" {
+		return false
+	}
+	if strings.TrimSpace(config.Provider) == "local" {
+		return strings.TrimSpace(config.Local.Endpoint) != ""
+	}
+	if strings.TrimSpace(config.Provider) == "api" {
+		return strings.TrimSpace(config.API.BaseURL) != "" || strings.TrimSpace(config.API.Model) != ""
+	}
+	return strings.TrimSpace(config.Local.Endpoint) != "" ||
+		strings.TrimSpace(config.Local.Model) != "" ||
+		strings.TrimSpace(config.API.BaseURL) != "" ||
+		strings.TrimSpace(config.API.Model) != "" ||
+		strings.TrimSpace(config.API.APIKeyEnv) != "" ||
+		config.BatchSize > 0 || config.ChunkSize > 0 || config.Dimension > 0
+}
+
 func NewEmbeddingProviderFromConfig(config ConfigEmbeddings) (EmbeddingProvider, error) {
+	if !hasExplicitEmbeddingsProviderConfig(config) {
+		return nil, nil
+	}
 	config = normalizeWorkspaceConfig(WorkspaceConfig{Embeddings: config}).Embeddings
 	switch config.Provider {
 	case "none":
@@ -174,6 +207,30 @@ func requestEmbeddings(ctx context.Context, client *http.Client, endpoint, model
 	return nil, errors.New("embedding endpoint returned no embeddings")
 }
 
+func embeddingVersionForProvider(provider EmbeddingProvider) int {
+	if provider == nil {
+		return 0
+	}
+	type fingerprintProvider interface {
+		Fingerprint() string
+	}
+	label := provider.Name()
+	if fp, ok := provider.(fingerprintProvider); ok {
+		label = fp.Fingerprint()
+	} else {
+		type modeler interface {
+			Model() string
+		}
+		if m, ok := provider.(modeler); ok && strings.TrimSpace(m.Model()) != "" {
+			label += ":" + strings.TrimSpace(m.Model())
+		}
+		label += fmt.Sprintf(":dim=%d", provider.Dimension())
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(label))
+	return int(h.Sum32())
+}
+
 func deterministicEmbedding(text string, dim int) []float64 {
 	if dim <= 0 {
 		dim = 16
@@ -219,26 +276,6 @@ func decodeEmbedding(blob []byte) []float64 {
 	return vec
 }
 
-func cosineSimilarity(a, b []float64) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	var dot, an, bn float64
-	for i := 0; i < n; i++ {
-		dot += a[i] * b[i]
-		an += a[i] * a[i]
-		bn += b[i] * b[i]
-	}
-	if an == 0 || bn == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(an) * math.Sqrt(bn))
-}
-
 func normalizeSearchQuery(query string) []float64 {
 	return deterministicEmbedding(strings.TrimSpace(strings.ToLower(query)), 16)
 }
@@ -250,7 +287,7 @@ func NormalizeSearchQuery(query string) []float64 {
 func EmbedSearchQuery(ctx context.Context, provider EmbeddingProvider, query string) ([]float64, error) {
 	query = strings.TrimSpace(query)
 	if provider == nil {
-		return NormalizeSearchQuery(query), nil
+		return nil, errors.New("embedding provider is not configured")
 	}
 	vecs, err := provider.Embed(ctx, []string{query})
 	if err != nil {
@@ -264,7 +301,7 @@ func EmbedSearchQuery(ctx context.Context, provider EmbeddingProvider, query str
 
 func EmbeddingProviderLabel(provider EmbeddingProvider) string {
 	if provider == nil {
-		return "local-deterministic-v1"
+		return "unconfigured"
 	}
 	type modeler interface {
 		Model() string

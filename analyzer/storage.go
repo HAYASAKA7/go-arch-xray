@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -779,18 +778,6 @@ func (s *WorkspaceStore) GetStaleSymbolHashes(newHashes []SymbolHash) ([]SymbolH
 	return staleSymbolHashesFromStmt(stmt, newHashes)
 }
 
-func (s *WorkspaceStore) getStaleSymbolHashesTx(tx *sql.Tx, newHashes []SymbolHash) ([]SymbolHash, error) {
-	if len(newHashes) == 0 {
-		return nil, nil
-	}
-	stmt, err := tx.Prepare(`SELECT source_hash, embedding_version FROM symbol_hashes WHERE symbol_id = ?`)
-	if err != nil {
-		return nil, err
-	}
-	defer stmt.Close()
-	return staleSymbolHashesFromStmt(stmt, newHashes)
-}
-
 type symbolHashQuery interface {
 	QueryRow(args ...any) *sql.Row
 }
@@ -967,7 +954,8 @@ func ShadowStoreProgram(root string, prog *LoadedProgram) error {
 	if err != nil {
 		return err
 	}
-	changed, hashes, err := store.prepareChangedSymbols(context.Background(), prog.codeSymbols, prog.symbolHashes, provider)
+	hashes := withEmbeddingVersion(prog.symbolHashes, embeddingVersionForProvider(provider))
+	changed, hashes, err := store.prepareChangedSymbols(context.Background(), prog.codeSymbols, hashes, provider)
 	if err != nil {
 		return err
 	}
@@ -1028,6 +1016,7 @@ func (s *WorkspaceStore) prepareChangedSymbols(ctx context.Context, symbols []Co
 	if len(symbols) == 0 && len(hashes) == 0 {
 		return nil, nil, nil
 	}
+	hashes = withEmbeddingVersion(hashes, embeddingVersionForProvider(provider))
 	staleHashes, err := s.GetStaleSymbolHashes(hashes)
 	if err != nil {
 		return nil, nil, err
@@ -1053,35 +1042,6 @@ func (s *WorkspaceStore) prepareChangedSymbols(ctx context.Context, symbols []Co
 		}
 	}
 	return changed, hashes, nil
-}
-
-func (s *WorkspaceStore) upsertChangedSymbolsTx(ctx context.Context, tx *sql.Tx, symbols []CodeSymbol, hashes []SymbolHash, provider EmbeddingProvider) error {
-	if len(symbols) == 0 && len(hashes) == 0 {
-		return nil
-	}
-	staleHashes, err := s.getStaleSymbolHashesTx(tx, hashes)
-	if err != nil {
-		return err
-	}
-	staleByID := make(map[string]bool, len(staleHashes))
-	for _, hash := range staleHashes {
-		staleByID[hash.SymbolID] = true
-	}
-	changed := make([]CodeSymbol, 0, len(staleByID))
-	for _, symbol := range symbols {
-		if staleByID[symbol.ID] {
-			changed = append(changed, symbol)
-		}
-	}
-	if provider != nil && len(changed) > 0 {
-		if err := applySymbolEmbeddings(ctx, changed, provider); err != nil {
-			return err
-		}
-	}
-	if err := s.upsertSymbolsTx(tx, changed); err != nil {
-		return err
-	}
-	return s.upsertSymbolHashesTx(tx, hashes)
 }
 
 func (s *WorkspaceStore) upsertFileMetasTx(tx *sql.Tx, metas []FileMeta) error {
@@ -1308,6 +1268,18 @@ func (s *WorkspaceStore) upsertSymbolHashesTx(tx *sql.Tx, hashes []SymbolHash) e
 	return nil
 }
 
+func withEmbeddingVersion(hashes []SymbolHash, version int) []SymbolHash {
+	if len(hashes) == 0 {
+		return nil
+	}
+	out := make([]SymbolHash, len(hashes))
+	for i, hash := range hashes {
+		hash.EmbeddingVersion = version
+		out[i] = hash
+	}
+	return out
+}
+
 func packageImportEdges(prog *LoadedProgram) []ArchEdge {
 	if prog == nil {
 		return nil
@@ -1378,9 +1350,4 @@ func nullableTime(t time.Time) any {
 		return nil
 	}
 	return t
-}
-
-func workspaceDBExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

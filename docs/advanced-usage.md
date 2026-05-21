@@ -79,7 +79,7 @@ package-pattern sets; reduce it when memory is constrained.
 
 ## Shadow Workspace
 
-Version 0.7.0 initializes a project-local `.gax/` directory for persistent
+Version 0.7.1 initializes a project-local `.gax/` directory for persistent
 analysis metadata:
 
 - `.gax/cache.db`: SQLite shadow cache with WAL enabled.
@@ -88,7 +88,7 @@ analysis metadata:
   `.go-arch-xray.yml`.
 - `.gax/state.json`: background sync hash and progress state.
 
-The SQLite cache now backs the fast-path MCP tools in 0.7.0. Package
+The SQLite cache now backs the fast-path MCP tools in 0.7.1. Package
 dependencies, HTTP routes, gRPC endpoints, and `semantic_search` read from the
 persisted store, while SSA-heavy tools still rely on the in-memory compute
 router. The store is used to exercise schema migrations, snapshot writes,
