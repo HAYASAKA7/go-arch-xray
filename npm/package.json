@@ -27,7 +27,7 @@
   },
   "files": [
     "install.js",
-    "bin/",
+    "bin/go-arch-xray.js",
     "README.md",
     "LICENSE"
   ],

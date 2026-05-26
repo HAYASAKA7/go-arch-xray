@@ -3,22 +3,15 @@
 
 const { spawnSync } = require("child_process");
 const path = require("path");
-const os = require("os");
 const fs = require("fs");
 
-// Resolve package.json from the package root (not bin directory)
-const pkgPath = path.join(__dirname, "..", "package.json");
-const pkg = require(pkgPath);
-const VERSION = pkg.version;
-const TAG = `v${VERSION}`;
-
 const PLATFORM_MAP = {
-  "win32-x64": { goos: "windows", goarch: "amd64", ext: ".exe" },
-  "win32-arm64": { goos: "windows", goarch: "arm64", ext: ".exe" },
-  "darwin-x64": { goos: "darwin", goarch: "amd64", ext: "" },
-  "darwin-arm64": { goos: "darwin", goarch: "arm64", ext: "" },
-  "linux-x64": { goos: "linux", goarch: "amd64", ext: "" },
-  "linux-arm64": { goos: "linux", goarch: "arm64", ext: "" },
+  "win32-x64": { ext: ".exe" },
+  "win32-arm64": { ext: ".exe" },
+  "darwin-x64": { ext: "" },
+  "darwin-arm64": { ext: "" },
+  "linux-x64": { ext: "" },
+  "linux-arm64": { ext: "" },
 };
 
 function log(msg) {
@@ -44,9 +37,7 @@ function getBinaryPath() {
   }
 
   const target = detectTarget();
-  const binaryName = `go-arch-xray-${target.goos}-${target.goarch}${target.ext}`;
-  const binDir = path.join(__dirname, "bin");
-  const binPath = path.join(binDir, binaryName);
+  const binPath = path.join(__dirname, `go-arch-xray${target.ext}`);
 
   if (!fs.existsSync(binPath)) {
     throw new Error(
