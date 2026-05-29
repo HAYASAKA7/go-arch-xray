@@ -6,7 +6,12 @@ If you still observe high RSS on very large monorepos, narrow your `package_patt
 
 ## Configuration
 
-Go Architecture X-Ray can load repo defaults from `.go-arch-xray.yml` in the active project root. Explicit tool inputs always override config values. If no repo config exists, tools keep today's built-in defaults, with `go.work`/`go.mod` discovery used to suggest safer package patterns for multi-module repos.
+Go Architecture X-Ray can load project defaults from `.gax/config.yml` or
+repo defaults from `.go-arch-xray.yml` in the active project root. Explicit
+tool inputs always override config values, and `.gax/config.yml` takes
+precedence over `.go-arch-xray.yml` when both exist. If no repo config exists,
+tools keep today's built-in defaults, with `go.work`/`go.mod` discovery used
+to suggest safer package patterns for multi-module repos.
 
 Recommended workflow for AI clients:
 
@@ -44,15 +49,57 @@ orm:
   migration_dirs:
     - db/migrations
   table_inference: snake
+sync:
+  debounce: 2500ms
+  check_interval: 30s
+  auto_rebuild: true
+embeddings:
+  provider: local
+  local:
+    endpoint: http://localhost:11434/api/embeddings
+    model: bge-m3
+    timeout: 30s
+  api:
+    base_url: https://api.openai.com/v1
+    model: text-embedding-3-small
+    api_key_env: OPENAI_API_KEY
+    timeout: 30s
+  batch_size: 50
+  chunk_size: 500
+  dimension: 1024
 ```
 
-User-local defaults are also supported at the OS config path, for example `%APPDATA%\go-arch-xray\config.yml` on Windows or `~/.config/go-arch-xray/config.yml` on Linux. Repo config should hold shared team policy; user-local config is best for personal output preferences.
+User-local defaults are also supported at the OS config path, for example `%APPDATA%\go-arch-xray\config.yml` on Windows or `~/.config/go-arch-xray/config.yml` on Linux. Repo config should hold shared team policy; `.gax/config.yml` is best for project-local runtime overrides; user-local config is best for personal output preferences.
 
 `GO_ARCH_XRAY_CACHE_CAPACITY` sets the initial in-memory workspace cache
 capacity for the server process. Repo/user `cache_capacity` config takes
 precedence for analysis requests that load configuration. Increase capacity
 when one MCP session regularly alternates between several roots or
 package-pattern sets; reduce it when memory is constrained.
+
+## Shadow Workspace
+
+Version 0.7.1 initializes a project-local `.gax/` directory for persistent
+analysis metadata:
+
+- `.gax/cache.db`: SQLite shadow cache with WAL enabled.
+- `.gax/cache.db-wal` and `.gax/cache.db-shm`: SQLite WAL sidecar files.
+- `.gax/config.yml`: project-local overrides that take precedence over
+  `.go-arch-xray.yml`.
+- `.gax/state.json`: background sync hash and progress state.
+
+The SQLite cache now backs the fast-path MCP tools in 0.7.1. Package
+dependencies, HTTP routes, gRPC endpoints, and `semantic_search` read from the
+persisted store, while SSA-heavy tools still rely on the in-memory compute
+router. The store is used to exercise schema migrations, snapshot writes,
+symbol hashing, local embeddings, and background sync behavior.
+
+`semantic_search` intentionally reads the shadow `code_symbols` index through
+sqlite-vec for RAG context. Configure `embeddings.provider` as `local`, `api`, or `none`. The
+`local` provider posts to the configured local HTTP embedding endpoint, while
+the `api` provider posts to `<base_url>/embeddings` with a bearer token read
+from `api_key_env`. Symbol hashes are compared before provider calls so
+unchanged symbols keep their stored vectors during refreshes.
 
 ## Limitations
 

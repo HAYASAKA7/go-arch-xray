@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -58,6 +59,24 @@ func TestEffectiveWorkspaceConfig_RepoConfigOverridesDetectedPatterns(t *testing
 	}
 }
 
+func TestEffectiveWorkspaceConfig_ProjectLocalGAXOverridesRepoConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+	writeConfigTestFile(t, dir, WorkspaceConfigFile, "version: 1\npackage_patterns:\n  - ./repo/...\ncomplexity:\n  min_cognitive: 11\n")
+	writeConfigTestFile(t, dir, filepath.Join(".gax", "config.yml"), "version: 1\npackage_patterns:\n  - ./gax/...\ncomplexity:\n  min_cognitive: 21\n")
+
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		t.Fatalf("effective config: %v", err)
+	}
+	if !equalStringSlices(config.PackagePatterns, []string{"./gax/..."}) {
+		t.Fatalf("expected project-local package patterns, got %v", config.PackagePatterns)
+	}
+	if config.Complexity.MinCognitive != 21 {
+		t.Fatalf("expected project-local complexity override, got %+v", config.Complexity)
+	}
+}
+
 func TestInspectWorkspaceConfig_RecommendedNextStep(t *testing.T) {
 	dir := t.TempDir()
 	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
@@ -69,6 +88,9 @@ func TestInspectWorkspaceConfig_RecommendedNextStep(t *testing.T) {
 	if inspection.RecommendedNextStep == "" || !strings.Contains(inspection.RecommendedNextStep, "init_workspace_config") {
 		t.Fatalf("expected init recommendation when config is missing, got %q", inspection.RecommendedNextStep)
 	}
+	if inspection.ConfigPath != filepath.Join(dir, ".gax", "config.yml") {
+		t.Fatalf("expected project-local config path, got %q", inspection.ConfigPath)
+	}
 
 	writeConfigTestFile(t, dir, WorkspaceConfigFile, "version: 1\npackage_patterns:\n  - ./...\n")
 	inspection, err = InspectWorkspaceConfig(dir)
@@ -77,6 +99,43 @@ func TestInspectWorkspaceConfig_RecommendedNextStep(t *testing.T) {
 	}
 	if inspection.RecommendedNextStep == "" || !strings.Contains(inspection.RecommendedNextStep, "effective_config") {
 		t.Fatalf("expected effective config recommendation when config exists, got %q", inspection.RecommendedNextStep)
+	}
+}
+
+func TestInspectEmbeddingsSettings_ReportsSetupState(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	_ = statePath
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+
+	inspection, err := InspectEmbeddingsSettings(dir)
+	if err != nil {
+		t.Fatalf("inspect embeddings: %v", err)
+	}
+	if !inspection.EmbeddingsSetupRequired {
+		t.Fatalf("expected embeddings setup to be required, got %+v", inspection)
+	}
+	if inspection.LocalConfigYAML == "" || inspection.APIConfigYAML == "" {
+		t.Fatalf("expected config examples, got %+v", inspection)
+	}
+	if !strings.Contains(inspection.RecommendedNextStep, "call this tool with dismiss=true") {
+		t.Fatalf("expected actionable next step, got %q", inspection.RecommendedNextStep)
+	}
+}
+
+func TestUserWorkspaceStateSaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	state := &UserWorkspaceState{Version: 1, Embeddings: UserEmbeddingsState{Dismissed: true}}
+	if err := SaveUserWorkspaceStateToPath(path, state); err != nil {
+		t.Fatalf("save user state: %v", err)
+	}
+	got, err := LoadUserWorkspaceStateFromPath(path)
+	if err != nil {
+		t.Fatalf("load user state: %v", err)
+	}
+	if !got.Embeddings.Dismissed {
+		t.Fatalf("expected dismissed state to round-trip, got %+v", got)
 	}
 }
 
@@ -140,5 +199,101 @@ func TestEffectiveWorkspaceConfig_ORM(t *testing.T) {
 	}
 	if config.ORM.TableInference != "snake" {
 		t.Errorf("Expected table_inference to be snake, got %q", config.ORM.TableInference)
+	}
+}
+
+func TestEffectiveWorkspaceConfig_SourcesFilters(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+	writeConfigTestFile(t, dir, WorkspaceConfigFile, "version: 1\nsources:\n  exclude:\n    - vendor/\n    - \"*_test.go\"\n  include:\n    - cmd/\n")
+
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		t.Fatalf("effective config: %v", err)
+	}
+	if len(config.Sources.Exclude) != 2 || config.Sources.Exclude[0] != "vendor/" {
+		t.Fatalf("expected source excludes, got %+v", config.Sources)
+	}
+	if len(config.Sources.Include) != 1 || config.Sources.Include[0] != "cmd/" {
+		t.Fatalf("expected source includes, got %+v", config.Sources)
+	}
+}
+
+func TestEffectiveWorkspaceConfig_SyncSettings(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+	writeConfigTestFile(t, dir, WorkspaceConfigFile, "version: 1\nsync:\n  debounce: 1s\n  check_interval: 2m\n  auto_rebuild: false\n")
+
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		t.Fatalf("effective config: %v", err)
+	}
+	if config.Sync.Debounce.Duration() != time.Second {
+		t.Fatalf("expected sync debounce 1s, got %s", config.Sync.Debounce.Duration())
+	}
+	if config.Sync.CheckInterval.Duration() != 2*time.Minute {
+		t.Fatalf("expected sync check interval 2m, got %s", config.Sync.CheckInterval.Duration())
+	}
+	if config.Sync.AutoRebuild == nil || *config.Sync.AutoRebuild {
+		t.Fatalf("expected auto_rebuild=false, got %#v", config.Sync.AutoRebuild)
+	}
+}
+
+func TestEffectiveWorkspaceConfig_Embeddings(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+	writeConfigTestFile(t, dir, WorkspaceConfigFile, `version: 1
+embeddings:
+  provider: local
+  local:
+    endpoint: http://localhost:11434/api/embeddings
+    model: bge-m3
+    timeout: 31s
+  api:
+    base_url: https://api.openai.com/v1
+    model: text-embedding-3-small
+    api_key_env: OPENAI_API_KEY
+    timeout: 32s
+  batch_size: 25
+  chunk_size: 700
+  dimension: 1024
+`)
+
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		t.Fatalf("effective config: %v", err)
+	}
+	if config.Embeddings.Provider != "local" {
+		t.Fatalf("expected local provider, got %+v", config.Embeddings)
+	}
+	if config.Embeddings.Local.Endpoint != "http://localhost:11434/api/embeddings" || config.Embeddings.Local.Model != "bge-m3" {
+		t.Fatalf("expected local embedding config, got %+v", config.Embeddings.Local)
+	}
+	if config.Embeddings.Local.Timeout.Duration() != 31*time.Second {
+		t.Fatalf("expected local timeout 31s, got %s", config.Embeddings.Local.Timeout.Duration())
+	}
+	if config.Embeddings.API.BaseURL != "https://api.openai.com/v1" || config.Embeddings.API.APIKeyEnv != "OPENAI_API_KEY" {
+		t.Fatalf("expected API embedding config, got %+v", config.Embeddings.API)
+	}
+	if config.Embeddings.API.Timeout.Duration() != 32*time.Second {
+		t.Fatalf("expected API timeout 32s, got %s", config.Embeddings.API.Timeout.Duration())
+	}
+	if config.Embeddings.BatchSize != 25 || config.Embeddings.ChunkSize != 700 || config.Embeddings.Dimension != 1024 {
+		t.Fatalf("expected embedding tuning to round trip, got %+v", config.Embeddings)
+	}
+}
+
+func TestEffectiveWorkspaceConfig_ProjectLocalEmbeddingsOverrideRepoConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeConfigTestFile(t, dir, "go.mod", "module example.com/root\n\ngo 1.23\n")
+	writeConfigTestFile(t, dir, WorkspaceConfigFile, "version: 1\nembeddings:\n  provider: local\n  dimension: 16\n")
+	writeConfigTestFile(t, dir, filepath.Join(".gax", "config.yml"), "version: 1\nembeddings:\n  provider: api\n  dimension: 1536\n")
+
+	config, err := EffectiveWorkspaceConfig(dir)
+	if err != nil {
+		t.Fatalf("effective config: %v", err)
+	}
+	if config.Embeddings.Provider != "api" || config.Embeddings.Dimension != 1536 {
+		t.Fatalf("expected project-local embedding override, got %+v", config.Embeddings)
 	}
 }

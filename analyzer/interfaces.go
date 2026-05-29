@@ -217,15 +217,19 @@ func collectImplementors(pkg *packages.Package, iface *types.Interface, out *[]I
 }
 
 func isStdlib(pkgPath string) bool {
-	for i := 0; i < len(pkgPath); i++ {
-		switch pkgPath[i] {
-		case '.':
-			return false
-		case '/':
-			return true
-		}
+	if pkgPath == "" {
+		return false
 	}
-	return true
+	first := pkgPath
+	if idx := strings.IndexByte(pkgPath, '/'); idx >= 0 {
+		first = pkgPath[:idx]
+	}
+	switch first {
+	case "archive", "bufio", "builtin", "bytes", "cmp", "compress", "container", "context", "crypto", "database", "debug", "embed", "encoding", "errors", "expvar", "flag", "fmt", "hash", "html", "image", "index", "io", "log", "maps", "math", "mime", "net", "os", "path", "plugin", "reflect", "runtime", "slices", "sort", "strconv", "strings", "sync", "syscall", "testing", "text", "time", "unicode", "unsafe":
+		return true
+	default:
+		return false
+	}
 }
 
 func implementsInterface(T types.Type, iface *types.Interface) bool {

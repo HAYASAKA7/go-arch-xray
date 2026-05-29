@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-05-21
+
+### Changed
+
+- Clarified the embeddings setup flow so `semantic_search` now requires explicit provider configuration instead of silently falling back.
+- Removed confirmed dead private helpers from the analyzer storage and symbol layers.
+- Updated README and release docs to match the current embeddings and shadow-index behavior.
+
+## [0.7.0] - 2026-05-19
+
+### Added
+
+- Added a project-local `.gax/` workspace layout with automatic directory creation and `.gax/config.yml` precedence over `.go-arch-xray.yml`.
+- Added a SQLite shadow store at `.gax/cache.db` with WAL mode, schema migrations, file metadata, architecture edges, complexity metrics, HTTP routes, gRPC endpoints, code symbols, and symbol hashes.
+- Added background sync groundwork with persisted sync state, file hash scanning, rebuild queue prioritization, polling file watcher debounce/coalescing, and configurable `sync.debounce`, `sync.check_interval`, and `sync.auto_rebuild` settings.
+- Added compute-snapshot shadow writes for loaded programs so SSA-derived metadata can be flattened into SQLite while keeping MCP read paths on the existing in-memory analyzer.
+- Added AST code-symbol extraction, deterministic local embedding scaffolding, and semantic search over stored code symbols for RAG groundwork.
+- Added the `semantic_search` MCP tool to retrieve symbol-level source snippets from the SQLite shadow index for RAG context.
+- Added sqlite-vec as the vector index backing `semantic_search`, with dimension tracking and symbol-ID row mapping.
+- Added configurable RAG embedding providers for local HTTP endpoints and API-compatible `/embeddings` endpoints.
+- Added symbol-hash based selective re-embedding so unchanged symbols keep existing vectors during shadow index refreshes.
+- Added an MCP query-router layer for SSA-heavy tools with shared compute-lock busy responses and `_meta` freshness/status fields.
+
+### Changed
+
+- Kept SQLite in shadow/write-only mode: MCP responses still use the current in-memory read path until a future read-path flip is explicitly enabled.
+- Routed SSA-heavy handlers (`analyze_call_hierarchy`, `find_callers`, `find_call_path`, `trace_struct_lifecycle`, `detect_concurrency_risks`, `find_dead_code`, and `find_orphaned_database_models`) through the shared query router so foreground calls respect the same compute lock as background sync.
+- Extended source filtering and syntax-only loading so generated/vendor/test-style paths can be excluded before expensive analysis.
+- Updated startup to initialize the local `.gax/` workspace and begin background sync in shadow mode without requiring manual database creation.
+
 ## [0.6.9] - 2026-05-26
 
 ### Changed

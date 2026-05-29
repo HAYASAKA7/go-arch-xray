@@ -2,6 +2,9 @@
 
 npm distribution of [`go-arch-xray`](https://github.com/HAYASAKA7/go-arch-xray) — a
 Model Context Protocol (MCP) server for static analysis of Go codebases.
+Version 0.7.1 includes the project-local `.gax/` shadow SQLite index and
+background sync groundwork while keeping MCP responses on the in-memory
+analysis read path.
 
 This package contains a small Node launcher. On install, a `postinstall` script
 downloads the matching native binary (Windows / macOS / Linux × x64 / arm64)

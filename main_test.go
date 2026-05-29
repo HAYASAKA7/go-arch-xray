@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,9 +43,243 @@ func TestHandleSuggestAnalysisWorkflow_ReturnsTaskWorkflow(t *testing.T) {
 	}
 }
 
+func TestServerToolDefinitions_IncludeCoreAnalysisTools(t *testing.T) {
+	defs := serverToolDefinitions()
+	if len(defs) < 10 {
+		t.Fatalf("expected a meaningful server tool registry, got %d definitions", len(defs))
+	}
+
+	required := []string{
+		"get_package_dependencies",
+		"analyze_call_hierarchy",
+		"semantic_search",
+		"list_http_routes",
+		"list_grpc_endpoints",
+		"compute_complexity_metrics",
+	}
+	for _, name := range required {
+		if !containsToolDefinition(defs, name) {
+			t.Fatalf("missing required tool definition %q", name)
+		}
+	}
+}
+
+func TestHandleSemanticSearch_ReturnsIndexedSymbols(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		data := make([]map[string][]float64, 0, len(req.Input))
+		for _, input := range req.Input {
+			if strings.Contains(input, "RunIndexer") || input == "RunIndexer" {
+				data = append(data, map[string][]float64{"embedding": {1, 0, 0}})
+			} else {
+				data = append(data, map[string][]float64{"embedding": {0, 1, 0}})
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+
+	dir := createMainTestModule(t, "handlerrag", map[string]string{
+		"main.go": "package main\n\nfunc RunIndexer() string { return \"indexed\" }\n\ntype SearchTarget struct{}\n",
+	})
+	writeMainTestFile(t, dir, analyzer.WorkspaceConfigFile, `version: 1
+embeddings:
+  provider: local
+  local:
+    endpoint: `+server.URL+`
+    model: test-model
+  dimension: 3
+`)
+
+	workspace = analyzer.NewWorkspace()
+	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("initial load failed: %v", err)
+	}
+
+	toolResult, result, err := handleSemanticSearch(context.Background(), nil, SemanticSearchInput{
+		RootPath: dir,
+		Query:    "RunIndexer",
+		Limit:    5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if toolResult != nil {
+		t.Fatalf("expected structured search result, got tool result: %#v", toolResult)
+	}
+	if result == nil {
+		t.Fatal("expected semantic search result")
+	}
+	if len(result.Symbols) == 0 {
+		t.Fatalf("expected at least one symbol, got %#v", result)
+	}
+	if !semanticSearchHasSymbol(result.Symbols, "handlerrag.RunIndexer") {
+		t.Fatalf("expected RunIndexer in semantic search results, got %#v", result.Symbols)
+	}
+	if result.Meta == nil || result.Meta["source"] != "sqlite_shadow" {
+		t.Fatalf("expected sqlite shadow metadata, got %#v", result.Meta)
+	}
+}
+
+func TestHandleSemanticSearch_ReturnsToolErrorForEmptyQuery(t *testing.T) {
+	dir := createMainTestModule(t, "handlerragempty", map[string]string{
+		"main.go": "package main\n\nfunc main() {}\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	toolResult, result, err := handleSemanticSearch(context.Background(), nil, SemanticSearchInput{
+		RootPath: dir,
+		Query:    "   ",
+	})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected no structured result, got %#v", result)
+	}
+	if toolResult == nil || !toolResult.IsError {
+		t.Fatalf("expected MCP tool error result, got %#v", toolResult)
+	}
+}
+
+func TestHandleSemanticSearch_ReturnsSetupRequiredWhenEmbeddingsMissing(t *testing.T) {
+	dir := createMainTestModule(t, "handlerragsetup", map[string]string{
+		"main.go": "package main\n\nfunc RunIndexer() string { return \"indexed\" }\n",
+	})
+
+	workspace = analyzer.NewWorkspace()
+	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("initial load failed: %v", err)
+	}
+
+	toolResult, result, err := handleSemanticSearch(context.Background(), nil, SemanticSearchInput{
+		RootPath: dir,
+		Query:    "RunIndexer",
+		Limit:    5,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if result == nil || result.Total != 0 {
+		t.Fatalf("expected setup-required result with no symbols, got %#v", result)
+	}
+	if toolResult == nil || toolResult.IsError {
+		t.Fatalf("expected non-error MCP result, got %#v", toolResult)
+	}
+	if got := toolResult.Meta["status"]; got != "setup_required" {
+		t.Fatalf("expected setup_required status, got %#v", got)
+	}
+}
+
+func TestHandleSemanticSearch_UsesConfiguredEmbeddingProviderForQuery(t *testing.T) {
+	var sawSearchQuery bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		data := make([]map[string][]float64, 0, len(req.Input))
+		for _, input := range req.Input {
+			if input == "needle query" {
+				sawSearchQuery = true
+				data = append(data, map[string][]float64{"embedding": {1, 0, 0}})
+				continue
+			}
+			if strings.Contains(input, "Needle") {
+				data = append(data, map[string][]float64{"embedding": {1, 0, 0}})
+			} else {
+				data = append(data, map[string][]float64{"embedding": {0, 1, 0}})
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+
+	dir := createMainTestModule(t, "handlerprovidersearch", map[string]string{
+		"main.go": "package main\n\nfunc Needle() string { return \"needle\" }\n\nfunc Haystack() string { return \"hay\" }\n",
+	})
+	writeMainTestFile(t, dir, analyzer.WorkspaceConfigFile, "version: 1\nembeddings:\n  provider: local\n  local:\n    endpoint: "+server.URL+"\n    model: test-model\n  dimension: 3\n")
+
+	workspace = analyzer.NewWorkspace()
+	if _, err := workspace.GetOrLoad(dir, "./..."); err != nil {
+		t.Fatalf("initial load failed: %v", err)
+	}
+
+	_, result, err := handleSemanticSearch(context.Background(), nil, SemanticSearchInput{
+		RootPath: dir,
+		Query:    "needle query",
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if !sawSearchQuery {
+		t.Fatal("expected semantic_search to embed the query through the configured provider")
+	}
+	if result == nil || len(result.Symbols) != 1 || result.Symbols[0].ID != "handlerprovidersearch.Needle" {
+		t.Fatalf("expected provider-ranked Needle result, got %#v", result)
+	}
+	if result.Meta["model"] != "local:test-model" {
+		t.Fatalf("expected provider metadata, got %#v", result.Meta)
+	}
+}
+
+func TestStartBackgroundRuntime_InitializesShadowSync(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.23\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, analyzer.WorkspaceConfigFile), []byte("version: 1\nsync:\n  auto_rebuild: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime := startBackgroundRuntime(context.Background(), dir)
+	defer runtime.close()
+
+	if runtime.store == nil {
+		t.Fatal("expected workspace store to be opened")
+	}
+	if runtime.sync == nil {
+		t.Fatal("expected sync manager to be started")
+	}
+	if runtime.watcher != nil {
+		t.Fatal("expected watcher to remain disabled when auto_rebuild=false")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gax", "cache.db")); err != nil {
+		t.Fatalf("expected shadow cache database to exist: %v", err)
+	}
+}
+
 func containsString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsToolDefinition(defs []serverToolDefinition, want string) bool {
+	for _, def := range defs {
+		if def.Name == want {
+			return true
+		}
+	}
+	return false
+}
+
+func semanticSearchHasSymbol(symbols []SemanticSearchSymbol, id string) bool {
+	for _, symbol := range symbols {
+		if symbol.ID == id {
 			return true
 		}
 	}
@@ -68,6 +305,25 @@ func TestHandleWorkflowPrompt_ReturnsPromptMessages(t *testing.T) {
 	}
 }
 
+func TestHandleEmbeddingsSetupPrompt_ReturnsSetupGuide(t *testing.T) {
+	result, err := handleEmbeddingsSetupPrompt(context.Background(), &mcp.GetPromptRequest{
+		Params: &mcp.GetPromptParams{Name: "go_embeddings_setup"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected prompt error: %v", err)
+	}
+	if result == nil || len(result.Messages) != 1 {
+		t.Fatalf("expected one prompt message, got %#v", result)
+	}
+	content, ok := result.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Messages[0].Content)
+	}
+	if !strings.Contains(content.Text, "inspect_embeddings_settings") || !strings.Contains(content.Text, "user-wide config") {
+		t.Fatalf("expected embeddings setup guide, got %q", content.Text)
+	}
+}
+
 func TestHandleAgentGuideResource_ReturnsGuide(t *testing.T) {
 	result, err := handleAgentGuideResource(context.Background(), &mcp.ReadResourceRequest{
 		Params: &mcp.ReadResourceParams{URI: "go-arch-xray://agent-guide"},
@@ -83,6 +339,24 @@ func TestHandleAgentGuideResource_ReturnsGuide(t *testing.T) {
 	}
 	if !strings.Contains(result.Contents[0].Text, "MCP-first") {
 		t.Fatalf("expected agent guide text, got %q", result.Contents[0].Text)
+	}
+}
+
+func TestHandleEmbeddingsSetupResource_ReturnsSetupGuide(t *testing.T) {
+	result, err := handleAgentGuideResource(context.Background(), &mcp.ReadResourceRequest{
+		Params: &mcp.ReadResourceParams{URI: "go-arch-xray://embeddings-setup"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected resource error: %v", err)
+	}
+	if result == nil || len(result.Contents) != 1 {
+		t.Fatalf("expected one resource content, got %#v", result)
+	}
+	if result.Contents[0].URI != "go-arch-xray://embeddings-setup" {
+		t.Fatalf("expected embeddings setup URI to round trip, got %q", result.Contents[0].URI)
+	}
+	if !strings.Contains(result.Contents[0].Text, "inspect_embeddings_settings") {
+		t.Fatalf("expected embeddings setup text, got %q", result.Contents[0].Text)
 	}
 }
 

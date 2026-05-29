@@ -28,18 +28,41 @@
 - `find_orphaned_database_models`: Detects database models that are defined but never initialized or used in queries. Currently supports GORM (`gorm:"..."` tagged structs), ent, sqlx, bun, and sqlc. Reports models with confidence, actionability, evidence, and summary metadata so clients can distinguish deletion candidates from verify-first findings. Includes table name inference, cross-referencing with migration files, nested model destination matching, and bounded wrapper forwarding so context-aware tenant sessions and repository helpers are less likely to produce false positives. Use `scope_package_pattern` to report only models in the package subtree under review.
 - `compute_complexity_metrics`: Reports per-function cyclomatic complexity, cognitive complexity, body lines, max nesting, Halstead metrics, and `maintainability_index`. Use it before refactors, during code review, for onboarding, and when prioritizing tests. Use `min_cyclomatic`, `min_cognitive`, `min_halstead_volume`, `max_maintainability_index`, and `sort_by` to focus results; set `include_packages: true` for package-level debt scans. Prefer `sort_by: "halstead_volume"` or `"halstead_effort"` for dense expression/operator-heavy code, and `sort_by: "maintainability"` to review lowest maintainability scores first. Complexity, Halstead, and maintainability metrics are structural ranking signals, not proof of performance, security, or correctness problems.
 
+### RAG & Symbol Search
+
+- `semantic_search`: Searches the project-local SQLite index for code symbols
+  related to a natural-language or code query. Returns symbol source snippets,
+  file paths, line ranges, package paths, and metadata suitable for RAG
+  context assembly. In 0.7.1 it reads from the `code_symbols` table through
+  sqlite-vec; embeddings are selected from config with
+  `embeddings.provider: local`, `api`, or `none`.
+
 ### Workspace Management
 
 - `suggest_analysis_workflow`: Returns a compact MCP-first workflow for Go repository onboarding, refactor prechecks, cleanup audits, API surface inventory, concurrency review, or architecture checks. Call this before reading files when the user asks to check, inspect, understand, review, audit, map, or refactor a Go repository.
 - `reload_workspace`: Invalidates and reloads the cached `go/packages` and SSA analysis for a root path and package pattern.
 - `cache_status`: Returns LRU cache occupancy and per-entry metadata (package count, function count, and last access time).
 - `clear_cache`: Clears cache entries by `root_path`/`package_pattern` key, or clears all entries with `all: true`.
-- `inspect_workspace_config`: Shows the repo config path, user-local config path, auto-detected `go.work`/`go.mod` defaults, and the effective config used by tools.
+- `inspect_workspace_config`: Shows the `.gax/config.yml` path, repo config path, user-local config path, auto-detected `go.work`/`go.mod` defaults, and the effective config used by tools.
 - `suggest_workspace_config`: Returns a proposed `.go-arch-xray.yml` from `go.work`/`go.mod` discovery without writing files.
 - `init_workspace_config`: Writes `.go-arch-xray.yml` in the repo root from discovered defaults. It does not overwrite an existing file unless `overwrite: true` is passed.
 - `list_entrypoints`: Lists `main` functions, `init` functions, and goroutine spawn sites across loaded packages.
 - `list_http_routes`: Scans source files for HTTP route registrations (net/http, gin, chi, gorilla/mux, echo, fiber, fasthttp/router). Returns route method, path, handler, framework, and source location for literal-path routes. Supports cursor streaming for large route tables.
 - `list_grpc_endpoints`: Discovers generated grpc-go `ServiceDesc` methods and `Register<Service>Server` call sites in loaded Go packages. Returns service, method, full method path, RPC type (`unary`, `client_stream`, `server_stream`, `bidi_stream`), handler, proto metadata, registration status, implementations, and source locations. Include generated `*.pb.go` or `*_grpc.pb.go` packages in the package pattern. Pagination and streaming cover endpoint rows and registration rows together; `total` and `total_registrations` report each full unpaged count.
+
+### Shadow Index and Status Handling
+
+- On startup, the server creates a project-local `.gax/` workspace and opens
+  `.gax/cache.db` in WAL mode.
+- In 0.7.1, SQLite backs the fast-path tools (`get_package_dependencies`,
+  `list_http_routes`, `list_grpc_endpoints`, and `semantic_search`) while
+  background sync validates persisted snapshots, file hashes, symbol hashes,
+  and local deterministic embeddings. SSA-heavy tools still use the in-memory
+  compute router.
+- SSA-heavy tools share a query-router compute lock with background sync. If
+  indexing is already running, tools return a non-error MCP result with
+  `_meta.status: "busy"`, `_meta.rebuilding: true`, and an ETA so clients can
+  retry without treating the server transport as failed.
 
 ## Prompts and Resources
 
@@ -48,6 +71,7 @@ need client-specific skill files to discover good tool workflows.
 
 Prompts:
 
+- `go_embeddings_setup`
 - `go_onboarding`
 - `go_refactor_precheck`
 - `go_cleanup`
@@ -58,6 +82,7 @@ Prompts:
 Resources:
 
 - `go-arch-xray://agent-guide`
+- `go-arch-xray://embeddings-setup`
 - `go-arch-xray://workflow/onboarding`
 - `go-arch-xray://workflow/refactor_precheck`
 - `go-arch-xray://workflow/cleanup`

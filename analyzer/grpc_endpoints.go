@@ -107,13 +107,19 @@ func ListGRPCEndpoints(ws *Workspace, dir, pattern string) (*GRPCEndpointsResult
 }
 
 func ListGRPCEndpointsWithOptions(ws *Workspace, dir, pattern string, opts QueryOptions) (*GRPCEndpointsResult, error) {
-	prog, err := ws.GetOrLoadSyntaxOnly(dir, pattern)
-	if err != nil {
+	if _, err := ws.GetOrLoadSyntaxOnly(dir, pattern); err != nil {
 		return nil, fmt.Errorf("loading packages: %w", err)
 	}
+	store, err := OpenWorkspaceStore(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
 
-	endpoints := append([]GRPCEndpoint(nil), prog.grpcEndpoints...)
-	registrations := append([]GRPCRegistration(nil), prog.grpcRegistrations...)
+	endpoints, registrations, err := store.GetGRPCEndpoints()
+	if err != nil {
+		return nil, err
+	}
 	sortGRPCEndpoints(endpoints)
 	sortGRPCRegistrations(registrations)
 

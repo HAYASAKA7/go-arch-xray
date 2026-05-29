@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
 	"gopkg.in/yaml.v3"
@@ -20,12 +21,43 @@ type WorkspaceConfig struct {
 	Workspace       ConfigWorkspace  `json:"workspace" yaml:"workspace,omitempty"`
 	Modules         []ConfigModule   `json:"modules,omitempty" yaml:"modules,omitempty"`
 	PackagePatterns []string         `json:"package_patterns,omitempty" yaml:"package_patterns,omitempty"`
+	Sources         ConfigSources    `json:"sources,omitempty" yaml:"sources,omitempty"`
 	CacheCapacity   int              `json:"cache_capacity,omitempty" yaml:"cache_capacity,omitempty"`
 	Output          ConfigOutput     `json:"output,omitempty" yaml:"output,omitempty"`
 	Boundaries      []BoundaryRule   `json:"boundaries,omitempty" yaml:"boundaries,omitempty"`
 	Complexity      ConfigComplexity `json:"complexity,omitempty" yaml:"complexity,omitempty"`
 	Lifecycle       ConfigLifecycle  `json:"lifecycle,omitempty" yaml:"lifecycle,omitempty"`
 	ORM             ConfigORM        `json:"orm,omitempty" yaml:"orm,omitempty"`
+	Sync            ConfigSync       `json:"sync,omitempty" yaml:"sync,omitempty"`
+	Embeddings      ConfigEmbeddings `json:"embeddings,omitempty" yaml:"embeddings,omitempty"`
+}
+
+type ConfigSync struct {
+	Debounce      ConfigDuration `json:"debounce,omitempty" yaml:"debounce,omitempty"`
+	CheckInterval ConfigDuration `json:"check_interval,omitempty" yaml:"check_interval,omitempty"`
+	AutoRebuild   *bool          `json:"auto_rebuild,omitempty" yaml:"auto_rebuild,omitempty"`
+}
+
+type ConfigEmbeddings struct {
+	Provider  string                  `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Local     ConfigEmbeddingEndpoint `json:"local,omitempty" yaml:"local,omitempty"`
+	API       ConfigEmbeddingAPI      `json:"api,omitempty" yaml:"api,omitempty"`
+	BatchSize int                     `json:"batch_size,omitempty" yaml:"batch_size,omitempty"`
+	ChunkSize int                     `json:"chunk_size,omitempty" yaml:"chunk_size,omitempty"`
+	Dimension int                     `json:"dimension,omitempty" yaml:"dimension,omitempty"`
+}
+
+type ConfigEmbeddingEndpoint struct {
+	Endpoint string         `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Model    string         `json:"model,omitempty" yaml:"model,omitempty"`
+	Timeout  ConfigDuration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+}
+
+type ConfigEmbeddingAPI struct {
+	BaseURL   string         `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	Model     string         `json:"model,omitempty" yaml:"model,omitempty"`
+	APIKeyEnv string         `json:"api_key_env,omitempty" yaml:"api_key_env,omitempty"`
+	Timeout   ConfigDuration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
 type ConfigORM struct {
@@ -37,6 +69,11 @@ type ConfigORM struct {
 type ConfigWorkspace struct {
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
 	File string `json:"file,omitempty" yaml:"file,omitempty"`
+}
+
+type ConfigSources struct {
+	Include []string `json:"include,omitempty" yaml:"include,omitempty"`
+	Exclude []string `json:"exclude,omitempty" yaml:"exclude,omitempty"`
 }
 
 type ConfigModule struct {
@@ -70,17 +107,48 @@ type ConfigLifecycle struct {
 }
 
 type WorkspaceConfigInspection struct {
-	RootPath            string          `json:"root_path"`
-	ConfigPath          string          `json:"config_path"`
-	ConfigExists        bool            `json:"config_exists"`
-	UserConfigPath      string          `json:"user_config_path,omitempty"`
-	UserConfigExists    bool            `json:"user_config_exists"`
-	GoWorkPath          string          `json:"go_work_path,omitempty"`
-	GoModPath           string          `json:"go_mod_path,omitempty"`
-	SuggestedConfig     WorkspaceConfig `json:"suggested_config"`
-	EffectiveConfig     WorkspaceConfig `json:"effective_config"`
-	RecommendedNextStep string          `json:"recommended_next_step,omitempty"`
-	Notes               []string        `json:"notes,omitempty"`
+	RootPath                 string          `json:"root_path"`
+	ConfigPath               string          `json:"config_path"`
+	ConfigExists             bool            `json:"config_exists"`
+	UserConfigPath           string          `json:"user_config_path,omitempty"`
+	UserConfigExists         bool            `json:"user_config_exists"`
+	UserStatePath            string          `json:"user_state_path,omitempty"`
+	UserStateExists          bool            `json:"user_state_exists"`
+	GoWorkPath               string          `json:"go_work_path,omitempty"`
+	GoModPath                string          `json:"go_mod_path,omitempty"`
+	SuggestedConfig          WorkspaceConfig `json:"suggested_config"`
+	EffectiveConfig          WorkspaceConfig `json:"effective_config"`
+	EmbeddingsConfigured     bool            `json:"embeddings_configured"`
+	EmbeddingsSetupRequired  bool            `json:"embeddings_setup_required"`
+	EmbeddingsSetupDismissed bool            `json:"embeddings_setup_dismissed"`
+	EmbeddingsStatePath      string          `json:"embeddings_state_path,omitempty"`
+	RecommendedNextStep      string          `json:"recommended_next_step,omitempty"`
+	Notes                    []string        `json:"notes,omitempty"`
+}
+
+type EmbeddingsSettingsInspection struct {
+	RootPath                 string          `json:"root_path"`
+	ConfigPath               string          `json:"config_path"`
+	ConfigExists             bool            `json:"config_exists"`
+	UserConfigPath           string          `json:"user_config_path,omitempty"`
+	UserConfigExists         bool            `json:"user_config_exists"`
+	UserStatePath            string          `json:"user_state_path,omitempty"`
+	UserStateExists          bool            `json:"user_state_exists"`
+	EmbeddingsConfigured     bool            `json:"embeddings_configured"`
+	EmbeddingsSetupRequired  bool            `json:"embeddings_setup_required"`
+	EmbeddingsSetupDismissed bool            `json:"embeddings_setup_dismissed"`
+	EffectiveConfig          WorkspaceConfig `json:"effective_config"`
+	LocalConfigYAML          string          `json:"local_config_yaml,omitempty"`
+	APIConfigYAML            string          `json:"api_config_yaml,omitempty"`
+	RecommendedNextStep      string          `json:"recommended_next_step,omitempty"`
+	Notes                    []string        `json:"notes,omitempty"`
+}
+
+type workspaceConfigResolution struct {
+	UserExists           bool
+	RepoExists           bool
+	ProjectExists        bool
+	EmbeddingsConfigured bool
 }
 
 type WorkspaceConfigInitResult struct {
@@ -99,21 +167,32 @@ func InspectWorkspaceConfig(root string) (*WorkspaceConfigInspection, error) {
 	if err != nil {
 		return nil, err
 	}
-	effective, repoExists, userExists, err := effectiveWorkspaceConfigWithSources(root, suggested)
+	effective, resolution, err := effectiveWorkspaceConfigWithSources(root, suggested)
 	if err != nil {
 		return nil, err
 	}
+	setupState, err := LoadUserWorkspaceState()
+	if err != nil {
+		return nil, err
+	}
+	setupDismissed := setupState != nil && setupState.Embeddings.Dismissed
 
 	inspection := &WorkspaceConfigInspection{
-		RootPath:            root,
-		ConfigPath:          RepoWorkspaceConfigPath(root),
-		ConfigExists:        repoExists,
-		UserConfigPath:      UserWorkspaceConfigPath(),
-		UserConfigExists:    userExists,
-		SuggestedConfig:     suggested,
-		EffectiveConfig:     effective,
-		RecommendedNextStep: configRecommendedNextStep(repoExists),
-		Notes:               configNotes(suggested, repoExists, userExists),
+		RootPath:                 root,
+		ConfigPath:               ProjectWorkspaceConfigPath(root),
+		ConfigExists:             resolution.RepoExists || resolution.ProjectExists,
+		UserConfigPath:           UserWorkspaceConfigPath(),
+		UserConfigExists:         resolution.UserExists,
+		UserStatePath:            UserWorkspaceStatePath(),
+		UserStateExists:          pathExists(UserWorkspaceStatePath()),
+		SuggestedConfig:          suggested,
+		EffectiveConfig:          effective,
+		EmbeddingsConfigured:     resolution.EmbeddingsConfigured,
+		EmbeddingsSetupRequired:  !resolution.EmbeddingsConfigured && !setupDismissed,
+		EmbeddingsSetupDismissed: setupDismissed,
+		EmbeddingsStatePath:      UserWorkspaceStatePath(),
+		RecommendedNextStep:      configRecommendedNextStep(resolution.RepoExists, resolution.EmbeddingsConfigured, setupDismissed),
+		Notes:                    configNotes(suggested, resolution.RepoExists, resolution.UserExists),
 	}
 	if suggested.Workspace.Mode == "go_work" {
 		inspection.GoWorkPath = filepath.Join(root, suggested.Workspace.File)
@@ -122,6 +201,76 @@ func InspectWorkspaceConfig(root string) (*WorkspaceConfigInspection, error) {
 		inspection.GoModPath = filepath.Join(root, suggested.Workspace.File)
 	}
 	return inspection, nil
+}
+
+func InspectEmbeddingsSettings(root string) (*EmbeddingsSettingsInspection, error) {
+	root = filepath.Clean(root)
+	suggested, err := SuggestWorkspaceConfig(root)
+	if err != nil {
+		return nil, err
+	}
+	effective, resolution, err := effectiveWorkspaceConfigWithSources(root, suggested)
+	if err != nil {
+		return nil, err
+	}
+	state, err := LoadUserWorkspaceState()
+	if err != nil {
+		return nil, err
+	}
+	localExample, err := MarshalWorkspaceConfig(WorkspaceConfig{
+		Version: 1,
+		Embeddings: ConfigEmbeddings{
+			Provider: "local",
+			Local: ConfigEmbeddingEndpoint{
+				Endpoint: "http://localhost:11434/api/embeddings",
+				Model:    "bge-m3",
+			},
+			BatchSize: 50,
+			ChunkSize: 500,
+			Dimension: 1024,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	apiExample, err := MarshalWorkspaceConfig(WorkspaceConfig{
+		Version: 1,
+		Embeddings: ConfigEmbeddings{
+			Provider: "api",
+			API: ConfigEmbeddingAPI{
+				BaseURL:   "https://api.openai.com/v1",
+				Model:     "text-embedding-3-small",
+				APIKeyEnv: "OPENAI_API_KEY",
+			},
+			BatchSize: 50,
+			ChunkSize: 500,
+			Dimension: 1536,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &EmbeddingsSettingsInspection{
+		RootPath:                 root,
+		ConfigPath:               ProjectWorkspaceConfigPath(root),
+		ConfigExists:             resolution.RepoExists || resolution.ProjectExists,
+		UserConfigPath:           UserWorkspaceConfigPath(),
+		UserConfigExists:         resolution.UserExists,
+		UserStatePath:            UserWorkspaceStatePath(),
+		UserStateExists:          pathExists(UserWorkspaceStatePath()),
+		EmbeddingsConfigured:     resolution.EmbeddingsConfigured,
+		EmbeddingsSetupRequired:  !resolution.EmbeddingsConfigured && (state == nil || !state.Embeddings.Dismissed),
+		EmbeddingsSetupDismissed: state != nil && state.Embeddings.Dismissed,
+		EffectiveConfig:          effective,
+		LocalConfigYAML:          localExample,
+		APIConfigYAML:            apiExample,
+		RecommendedNextStep:      EmbeddingsRecommendedNextStep(resolution.EmbeddingsConfigured, state != nil && state.Embeddings.Dismissed),
+		Notes: []string{
+			"user-local config is read from the OS config directory or GO_ARCH_XRAY_USER_CONFIG",
+			".gax/config.yml still overrides repo config for project-local overrides",
+			"inspect_workspace_config reports the same embedding setup state for startup checks",
+		},
+	}, nil
 }
 
 func SuggestWorkspaceConfig(root string) (WorkspaceConfig, error) {
@@ -158,7 +307,7 @@ func EffectiveWorkspaceConfig(root string) (WorkspaceConfig, error) {
 	if err != nil {
 		return WorkspaceConfig{}, err
 	}
-	effective, _, _, err := effectiveWorkspaceConfigWithSources(root, suggested)
+	effective, _, err := effectiveWorkspaceConfigWithSources(root, suggested)
 	return effective, err
 }
 
@@ -217,6 +366,10 @@ func RepoWorkspaceConfigPath(root string) string {
 	return filepath.Join(filepath.Clean(root), WorkspaceConfigFile)
 }
 
+func ProjectWorkspaceConfigPath(root string) string {
+	return filepath.Join(WorkspaceLayoutFor(root).GAXPath, "config.yml")
+}
+
 func UserWorkspaceConfigPath() string {
 	if override, ok := os.LookupEnv(userConfigEnv); ok {
 		override = strings.TrimSpace(override)
@@ -232,31 +385,51 @@ func UserWorkspaceConfigPath() string {
 	return filepath.Join(dir, "go-arch-xray", "config.yml")
 }
 
+func UserWorkspaceStatePath() string {
+	base := userWorkspaceBaseDir()
+	if base == "" {
+		return ""
+	}
+	return filepath.Join(base, "state.json")
+}
+
 func ConfigPackagePatterns(config WorkspaceConfig) []string {
 	config = normalizeWorkspaceConfig(config)
 	return append([]string(nil), config.PackagePatterns...)
 }
 
-func effectiveWorkspaceConfigWithSources(root string, suggested WorkspaceConfig) (WorkspaceConfig, bool, bool, error) {
+func effectiveWorkspaceConfigWithSources(root string, suggested WorkspaceConfig) (WorkspaceConfig, workspaceConfigResolution, error) {
 	effective := suggested
-	userConfig, userExists, err := loadOptionalWorkspaceConfig(UserWorkspaceConfigPath())
+	var resolution workspaceConfigResolution
+	userConfig, userExists, err := loadOptionalWorkspaceConfigWithRaw(UserWorkspaceConfigPath())
 	if err != nil {
-		return WorkspaceConfig{}, false, false, err
+		return WorkspaceConfig{}, resolution, err
 	}
 	if userExists {
 		effective = mergeWorkspaceConfig(effective, userConfig)
+		resolution.UserExists = true
 	}
-	repoConfig, repoExists, err := loadOptionalWorkspaceConfig(RepoWorkspaceConfigPath(root))
+	repoConfig, repoExists, err := loadOptionalWorkspaceConfigWithRaw(RepoWorkspaceConfigPath(root))
 	if err != nil {
-		return WorkspaceConfig{}, false, false, err
+		return WorkspaceConfig{}, resolution, err
 	}
 	if repoExists {
 		effective = mergeWorkspaceConfig(effective, repoConfig)
+		resolution.RepoExists = true
 	}
-	return normalizeWorkspaceConfig(effective), repoExists, userExists, nil
+	projectConfig, projectExists, err := loadOptionalWorkspaceConfigWithRaw(ProjectWorkspaceConfigPath(root))
+	if err != nil {
+		return WorkspaceConfig{}, resolution, err
+	}
+	if projectExists {
+		effective = mergeWorkspaceConfig(effective, projectConfig)
+		resolution.ProjectExists = true
+	}
+	resolution.EmbeddingsConfigured = hasExplicitEmbeddingsConfig(userConfig) || hasExplicitEmbeddingsConfig(repoConfig) || hasExplicitEmbeddingsConfig(projectConfig)
+	return normalizeWorkspaceConfig(effective), resolution, nil
 }
 
-func loadOptionalWorkspaceConfig(path string) (WorkspaceConfig, bool, error) {
+func loadOptionalWorkspaceConfigWithRaw(path string) (WorkspaceConfig, bool, error) {
 	if path == "" {
 		return WorkspaceConfig{}, false, nil
 	}
@@ -271,7 +444,7 @@ func loadOptionalWorkspaceConfig(path string) (WorkspaceConfig, bool, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return WorkspaceConfig{}, false, fmt.Errorf("parse workspace config %s: %w", path, err)
 	}
-	return normalizeWorkspaceConfig(config), true, nil
+	return config, true, nil
 }
 
 func mergeWorkspaceConfig(base, overlay WorkspaceConfig) WorkspaceConfig {
@@ -288,6 +461,7 @@ func mergeWorkspaceConfig(base, overlay WorkspaceConfig) WorkspaceConfig {
 	if len(overlay.PackagePatterns) > 0 {
 		merged.PackagePatterns = append([]string(nil), overlay.PackagePatterns...)
 	}
+	merged.Sources = mergeConfigSources(merged.Sources, overlay.Sources)
 	if overlay.CacheCapacity > 0 {
 		merged.CacheCapacity = overlay.CacheCapacity
 	}
@@ -298,6 +472,8 @@ func mergeWorkspaceConfig(base, overlay WorkspaceConfig) WorkspaceConfig {
 	merged.Complexity = mergeConfigComplexity(merged.Complexity, overlay.Complexity)
 	merged.Lifecycle = mergeConfigLifecycle(merged.Lifecycle, overlay.Lifecycle)
 	merged.ORM = mergeConfigORM(merged.ORM, overlay.ORM)
+	merged.Sync = mergeConfigSync(merged.Sync, overlay.Sync)
+	merged.Embeddings = mergeConfigEmbeddings(merged.Embeddings, overlay.Embeddings)
 	return normalizeWorkspaceConfig(merged)
 }
 
@@ -311,6 +487,70 @@ func mergeConfigORM(base, overlay ConfigORM) ConfigORM {
 	}
 	if strings.TrimSpace(overlay.TableInference) != "" {
 		out.TableInference = strings.TrimSpace(overlay.TableInference)
+	}
+	return out
+}
+
+func mergeConfigSync(base, overlay ConfigSync) ConfigSync {
+	out := base
+	if overlay.Debounce.Duration() > 0 {
+		out.Debounce = overlay.Debounce
+	}
+	if overlay.CheckInterval.Duration() > 0 {
+		out.CheckInterval = overlay.CheckInterval
+	}
+	if overlay.AutoRebuild != nil {
+		v := *overlay.AutoRebuild
+		out.AutoRebuild = &v
+	}
+	return out
+}
+
+func mergeConfigEmbeddings(base, overlay ConfigEmbeddings) ConfigEmbeddings {
+	out := base
+	if strings.TrimSpace(overlay.Provider) != "" {
+		out.Provider = strings.TrimSpace(overlay.Provider)
+	}
+	if strings.TrimSpace(overlay.Local.Endpoint) != "" {
+		out.Local.Endpoint = strings.TrimSpace(overlay.Local.Endpoint)
+	}
+	if strings.TrimSpace(overlay.Local.Model) != "" {
+		out.Local.Model = strings.TrimSpace(overlay.Local.Model)
+	}
+	if overlay.Local.Timeout.Duration() > 0 {
+		out.Local.Timeout = overlay.Local.Timeout
+	}
+	if strings.TrimSpace(overlay.API.BaseURL) != "" {
+		out.API.BaseURL = strings.TrimSpace(overlay.API.BaseURL)
+	}
+	if strings.TrimSpace(overlay.API.Model) != "" {
+		out.API.Model = strings.TrimSpace(overlay.API.Model)
+	}
+	if strings.TrimSpace(overlay.API.APIKeyEnv) != "" {
+		out.API.APIKeyEnv = strings.TrimSpace(overlay.API.APIKeyEnv)
+	}
+	if overlay.API.Timeout.Duration() > 0 {
+		out.API.Timeout = overlay.API.Timeout
+	}
+	if overlay.BatchSize > 0 {
+		out.BatchSize = overlay.BatchSize
+	}
+	if overlay.ChunkSize > 0 {
+		out.ChunkSize = overlay.ChunkSize
+	}
+	if overlay.Dimension > 0 {
+		out.Dimension = overlay.Dimension
+	}
+	return out
+}
+
+func mergeConfigSources(base, overlay ConfigSources) ConfigSources {
+	out := base
+	if len(overlay.Include) > 0 {
+		out.Include = append([]string(nil), overlay.Include...)
+	}
+	if len(overlay.Exclude) > 0 {
+		out.Exclude = append([]string(nil), overlay.Exclude...)
 	}
 	return out
 }
@@ -377,6 +617,8 @@ func normalizeWorkspaceConfig(config WorkspaceConfig) WorkspaceConfig {
 		config.Version = 1
 	}
 	config.PackagePatterns = cleanStringSlice(config.PackagePatterns)
+	config.Sources.Include = cleanStringSlice(config.Sources.Include)
+	config.Sources.Exclude = cleanStringSlice(config.Sources.Exclude)
 	for i := range config.Modules {
 		config.Modules[i].Root = cleanModuleRoot(config.Modules[i].Root)
 		config.Modules[i].PackagePatterns = cleanStringSlice(config.Modules[i].PackagePatterns)
@@ -392,6 +634,34 @@ func normalizeWorkspaceConfig(config WorkspaceConfig) WorkspaceConfig {
 	}
 	if len(config.PackagePatterns) == 0 {
 		config.PackagePatterns = []string{"./..."}
+	}
+	if config.Sync.Debounce.Duration() <= 0 {
+		config.Sync.Debounce = ConfigDuration(2500 * time.Millisecond)
+	}
+	if config.Sync.CheckInterval.Duration() <= 0 {
+		config.Sync.CheckInterval = ConfigDuration(5 * time.Minute)
+	}
+	config.Embeddings.Provider = strings.ToLower(strings.TrimSpace(config.Embeddings.Provider))
+	if config.Embeddings.Provider == "" {
+		config.Embeddings.Provider = "local"
+	}
+	if config.Embeddings.BatchSize <= 0 {
+		config.Embeddings.BatchSize = 50
+	}
+	if config.Embeddings.ChunkSize <= 0 {
+		config.Embeddings.ChunkSize = 500
+	}
+	if config.Embeddings.Dimension <= 0 {
+		config.Embeddings.Dimension = 16
+	}
+	if config.Embeddings.Local.Timeout.Duration() <= 0 {
+		config.Embeddings.Local.Timeout = ConfigDuration(30 * time.Second)
+	}
+	if config.Embeddings.API.Timeout.Duration() <= 0 {
+		config.Embeddings.API.Timeout = ConfigDuration(30 * time.Second)
+	}
+	if strings.TrimSpace(config.Embeddings.API.APIKeyEnv) == "" {
+		config.Embeddings.API.APIKeyEnv = "OPENAI_API_KEY"
 	}
 	return config
 }
@@ -535,9 +805,55 @@ func configNotes(config WorkspaceConfig, repoExists, userExists bool) []string {
 	return notes
 }
 
-func configRecommendedNextStep(repoExists bool) string {
+func configRecommendedNextStep(repoExists, embeddingsConfigured, embeddingsDismissed bool) string {
 	if repoExists {
 		return "Use effective_config for analysis; do not call init_workspace_config unless the user explicitly asks to replace the repo config."
 	}
 	return "Use effective_config for analysis now; ask the user before calling init_workspace_config to create .go-arch-xray.yml."
+}
+
+func EmbeddingsRecommendedNextStep(configured, dismissed bool) string {
+	switch {
+	case configured:
+		return "Embeddings are configured; use semantic_search or re-open this tool only to review the provider settings."
+	case dismissed:
+		return "Embeddings setup notice is dismissed; call this tool with reopen=true if you want to show it again."
+	default:
+		return "Choose either the local or API example, save it to the user config path, or call this tool with dismiss=true to stop the notice."
+	}
+}
+
+func EmbeddingsSetupRequired(configured, dismissed bool) bool {
+	return !configured && !dismissed
+}
+
+func hasExplicitEmbeddingsConfig(config WorkspaceConfig) bool {
+	e := config.Embeddings
+	if strings.TrimSpace(e.Provider) != "" {
+		return true
+	}
+	if strings.TrimSpace(e.Local.Endpoint) != "" || strings.TrimSpace(e.Local.Model) != "" || e.Local.Timeout.Duration() > 0 {
+		return true
+	}
+	if strings.TrimSpace(e.API.BaseURL) != "" || strings.TrimSpace(e.API.Model) != "" || strings.TrimSpace(e.API.APIKeyEnv) != "" || e.API.Timeout.Duration() > 0 {
+		return true
+	}
+	if e.BatchSize > 0 || e.ChunkSize > 0 || e.Dimension > 0 {
+		return true
+	}
+	return false
+}
+
+func userWorkspaceBaseDir() string {
+	if override, ok := os.LookupEnv(userConfigEnv); ok {
+		override = strings.TrimSpace(override)
+		if override != "" && !strings.EqualFold(override, "off") && !strings.EqualFold(override, "none") {
+			return filepath.Dir(override)
+		}
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "go-arch-xray")
 }

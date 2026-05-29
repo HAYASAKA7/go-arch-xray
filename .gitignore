@@ -16,6 +16,7 @@ integration_realworld_test.go
 vendor/
 go.work
 go.work.sum
+.gax/
 
 # Coverage and profiling
 coverage.out
@@ -38,3 +39,6 @@ npm/package-lock.json
 npm-debug.log*
 *.tgz
 .npmrc
+
+# benchmark packages
+__pycache__/
